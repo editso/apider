@@ -210,7 +210,6 @@ class RemoteScheduler(Scheduler):
         remove_worker = []
         for worker in self._workers:
             if worker.is_available():
-                worker = worker
                 remove_worker.append(worker)
                 self._workings.append(worker)
                 break

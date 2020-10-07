@@ -173,7 +173,7 @@ class LinkedinUserInfo(object):
         self.sleep(sleep)
 
     def sleep(self, sec):
-        self.driver.implicitly_wait(sec)
+        time.sleep(sec)
 
     def get_name(self):
         return self.selector.by_xpath('//*[@id="ember59"]/div[2]/div[2]/div[1]/ul[1]/li[1]').text
@@ -240,7 +240,7 @@ class LinkedinUserInfo(object):
         contacts = []
         contact_el = self.driver.find_element_by_link_text("联系方式")
         self.scroll_to_element(contact_el)
-        self.click_element(contact_el)
+        self.click_element(contact_el, 2)
         contact_el = self.driver.find_element_by_xpath('//div[@class="pv-profile-section__section-info section-info"]')
         items = contact_el.find_elements_by_css_selector('section.pv-contact-info__contact-type')
         for item in items:
@@ -259,14 +259,12 @@ class LinkedinUserInfo(object):
         followers = []
         follower_el = self.selector.by_xpath('//ul[@class="entity-list row"]/../../div/../../div')
         self.selector.scroll_lazy_load(follower_el)
-        # TouchActions(self.driver).scroll_from_element(follower_el, 0, 5000).perform()
         items = follower_el.find_elements_by_css_selector('li.entity-list-item')
         for item in items:
             followers.append(item.find_element_by_css_selector('a.pv-interest-entity-link').get_attribute('href'))
         self.xpath(
             '//button[@class="artdeco-modal__dismiss artdeco-button artdeco-button--circle artdeco-button--muted artdeco-button--2 artdeco-button--tertiary ember-view"]').click()
         return followers
-
 
     def get_avatar(self):
         a_el = self.selector.by_xpath(
@@ -336,10 +334,22 @@ class LinkedinUserInfo(object):
             'send': self._get_recommendation('已发出')
         }
 
+    def get_cert(self, url):
+        self.driver.get(url)
+        self.sleep(3)
+        lazy_el = self.selector.by_xpath('//div[@class="artdeco-modal__content ember-view"]')
+        if not lazy_el:
+            return
+        self.selector.scroll_lazy_load(lazy_el)
+        items = self.selector.by_all_xpath('div//a', with_element=lazy_el)
+        data = []
+        for item in items:
+            data.append(item.get_attribute('href'))
+        return data
+
     def get_skill(self):
         show = self.selector.by_xpath('//h2[text()="技能认可"]/../../..//button')
         if show and re.match('.*展开.*', show.text):
-            print("click")
             self.click_element(show, 2)
         items = self.selector.by_all_xpath('//h2[text()="技能认可"]/../../..//ol')
         skill = []
@@ -433,14 +443,17 @@ class Linkedin(Spider):
         driver = self.driver
         driver.implicitly_wait(5)
         with LinkedinUserInfo(driver, self.selector) as user:
-            # print(user.to_json())
-            # self.storage.save(self.name, user.to_json())
-
+            self.storage.save(self.name, user.to_json())
             # save('./', 'test.json', json.dumps(user.get_skill()))
             # print(user.get_recommendation())
-            for item in user.get_follower():
-                # self.cache.push(item)
-                pass
+            # rec = user.get_recommendation()
+            for item in user.get_skill():
+                for i in item.get('skill'):
+                    print(user.get_cert(i.get('url')))
+
+            # for item in user.get_follower():
+            #     # self.cache.push(item)
+            #     pass
 
     def visit_user_info(self, url):
         if parse.urlparse(url).path.startswith("/in"):
@@ -455,5 +468,6 @@ class Linkedin(Spider):
         driver.get(self.page)
         self.load_cookies()
         driver.refresh()
+        time.sleep(2)
         self.check_login()
         self.crawl_user_info()

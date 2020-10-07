@@ -1,11 +1,11 @@
 from logging import *
-from urllib.request import Request, urlopen
 from urllib import parse
 from urllib.error import HTTPError
 import json
-import ssl
-import logging
 import requests
+from elasticsearch import Elasticsearch
+from base64 import b64decode
+from .utils import dynamic_attr
 
 
 class Storage:
@@ -19,74 +19,56 @@ class Storage:
         """
         pass
 
+    def save_stream(self, name, binary: bytes):
+        """
+        数据流文件
+        """
+        pass
+
+    def query(self, query, *args, **kwargs):
+        pass
+
+    def exists(self, index, unique, *args, **kwargs):
+        pass
+
 
 class ElasticStorage(Storage):
 
-    def __init__(self, host=None, port=None, user=None, password=None, schema="http", type_name="data"):
-        self.host = host
-        self.port = port
-        self.schema = schema
-        self.type_name = type_name
-        self.user = user
-        self.password = password
-        self._req = requests.Request(self._url())
+    def __init__(self, hosts=None,
+                 ports=None, user=None,
+                 password=None,
+                 scheme="http",
+                 verify_certs=False,
+                 type_name="data"):
+        self._es = Elasticsearch(hosts,
+                                 http_auth=(user, password),
+                                 scheme=scheme,
+                                 verify_certs=verify_certs,
+                                 ports=ports)
 
-    def _url(self, path=None):
-        url = None
-        if self.user:
-            url = "{}://{}:{}@{}:{}".format(self.schema, self.user, self.password, self.host, self.port)
-        else:
-            url = "{}://{}:{}".format(self.schema, self.host, self.port)
-        return parse.urljoin(url, path)
+    def save(self, index, data):
+        self._es.index(index=index, body=data)
 
-    def url(self):
-        return self._url()
+    def put_mapping(self, index, properties):
+        self._es.indices.put_mapping(index=index, body=properties)
 
-    def _execute(self, url, method="GET", **kwargs):
-        """
-        发送请求
-        """
-        try:
-            self._req.url = url
-            self._req.method = method
-            return requests.request(method=method, url=url, **kwargs, verify=False, headers=self._req.headers)
-        finally:
-            self.reset()
+    def save_stream(self, name, binary: bytes):
+        pass
 
-    def reset(self):
-        self._req.full_url = self._url(None)
-
-    def index_exists(self, name):
-        try:
-            data = self._execute(self._url(name))
-            code = data.json().get('status')
-            if code == 404:
-                return False
+    def exists(self, index, query, *args, **kwargs):
+        data = dynamic_attr(self.query(index, query=query))
+        if data._shards['total'] >= 1:
             return True
-        except HTTPError as e:
-            data = json.loads(e.read().decode("utf8"))
-            if data["status"] == 404:
-                return False
+        return False
 
-    def index_create(self, name):
-        try:
-            self._execute(self._url(name), method="PUT")
-
-        except HTTPError as e:
-            error("Index Create Error", e)
-
-    def save(self, name, data):
-        if not self.index_exists(name):
-            self.index_create(name)
-        try:
-            self._req.headers["content-type"] = "application/json"
-            data = self._execute(self._url("{}/{}".format(name, self.type_name)),
-                                 method="POST",
-                                 data=bytes(json.dumps(data, ensure_ascii=False), "utf8")).json()
-            print(data)
-            # self._req.remove_header("content-type")
-        except HTTPError as e:
-            error("Save Error", e.read())
+    def query(self, index, *args, **kwargs):
+        query = kwargs.get('query', {})
+        del kwargs['query']
+        return self._es.search(index=index, body={
+            'query': {
+                'term': query
+            }
+        }, *args, **kwargs)
 
 
 class Cache(object):

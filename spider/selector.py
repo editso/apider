@@ -5,6 +5,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from .utils import catcher, dynamic_attr
 import time
 
+
 class Selector(object):
 
     def __init__(self, driver: WebDriver):
@@ -23,17 +24,25 @@ class Selector(object):
     def execute_script(self, script, *args):
         return self.driver.execute_script(script, *args)
 
+    def execute_by_value_script(self, script, *args):
+        return self.execute_script("return {}".format(script), *args)
+
     def scroll_height(self, element=None):
-        return self.execute_script('return arguments[0].scrollHeight;', element or self._root)
+        return self.execute_by_value_script('arguments[0].scrollHeight;', element or self._root)
 
     def scroll_top(self, element):
-        return self.execute_script('return arguments[0].scrollTop;', element)
+        return self.execute_by_value_script('arguments[0].scrollTop;', element)
+
+    def can_show_height(self, element=None):
+        return self.execute_by_value_script('arguments[0].clientHeight;', element or self._root)
 
     def scroll_from(self, height, element=None):
         return self.execute_script('arguments[0].scrollTop = arguments[1];', element or self._root, height)
 
-    def can_show_height(self, element=None):
-        return self.execute_script('return arguments[0].clientHeight;', element or self._root)
+    def click(self, element):
+        if not element or not isinstance(element, WebElement):
+            return
+        self.execute_script('arguments[0].click()', element)
 
     def scroll_lazy_load(self, element=None, sleep=2):
         if not element or not isinstance(element, WebElement):

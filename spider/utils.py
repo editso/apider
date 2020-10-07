@@ -1,6 +1,9 @@
 import os
 import json
+import requests
+import base64
 import logging as _logging
+
 
 logging = _logging.getLogger(__name__)
 
@@ -62,3 +65,10 @@ def catcher(capture=True, default_value=None):
         return try_catch
 
     return wrapper
+
+
+def image_base64(url, *args, **kwargs):
+    data = requests.get(url, *args, **kwargs)
+    if not data.ok:
+        return None
+    return base64.b64encode(data.content)
