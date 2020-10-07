@@ -1,0 +1,6 @@
+.vscode
+venv
+*.json
+.idea
+\\*.pyc
+\\.*pyc.*
