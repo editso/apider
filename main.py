@@ -15,10 +15,11 @@ def server(port):
 
 class Linkin(object):
 
-    def crawl(self, url):
-        with Linkedin(user="79982473@qq.com",
+    def crawl(self, url, **kwargs):
+        with Linkedin(user="19965412404",
                       password="@12345678@",
                       storage=storage,
+                      **kwargs,
                       cache=QueueCache(),
                       page=url) as linkedin:
             linkedin.start()
@@ -40,7 +41,7 @@ class Task(Task):
 
     def get_task(self):
         url = self.queue.get()
-        return TaskInfo(Linkin.__name__, Linkin.crawl.__name__, url=url)
+        return TaskInfo(Linkin.__name__, Linkin.crawl.__name__, url=url, debug=True)
 
 
 def start_server(*ports):
@@ -64,14 +65,9 @@ if __name__ == "__main__":
                              password='USA76oBn6ZcowOpofKpS',
                              port=9200,
                              schema='https')
-    # print(storage.url())
-
-    # storage.save('test', {
-    #     'name': 'test'
-    # })
 
     logging.basicConfig(level=logging.INFO)
-    ports = (8003, 8004, 8005)
+    ports = (9999, 9991)
 
     p_server = multiprocessing.Process(target=start_server, args=ports)
     p_server.start()

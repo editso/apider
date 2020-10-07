@@ -121,6 +121,12 @@ class LinkedinUserInfo(object):
         desc = None
         text = None
 
+    class Skill(Element):
+        title = None
+        name = None
+        number = None
+        url = None
+
     def __init__(self, driver: Chrome, selector: Selector = None):
         self.driver = driver
         self.url = self.driver.current_url
@@ -128,7 +134,7 @@ class LinkedinUserInfo(object):
         self.action = ActionChains(self.driver)
         self.url_parse = parse.urlparse(self.url)
         self.selector = selector or Selector(self.driver)
-        self.scroll(0, 5000)
+        self.touch.scroll(0, 5000).perform()
 
     def __enter__(self):
         return self
@@ -140,7 +146,7 @@ class LinkedinUserInfo(object):
         pane = self.selector.by_xpath(
             '//button[@class="msg-overlay-bubble-header__control msg-overlay-bubble-header__control--new-convo-btn artdeco-button artdeco-button--circle artdeco-button--inverse artdeco-button--1 artdeco-button--tertiary ember-view"][last()]')
         if pane:
-            pane.click()
+            self.click_element(pane)
 
     def xpath(self, xpath, nullable=False):
         try:
@@ -162,8 +168,12 @@ class LinkedinUserInfo(object):
     def scroll_to_element_by_top(self, element):
         self.driver.execute_script("arguments[0].scrollIntoView()", element)
 
-    def click_element(self, element):
+    def click_element(self, element, sleep=0):
         self.driver.execute_script("arguments[0].click()", element)
+        self.sleep(sleep)
+
+    def sleep(self, sec):
+        self.driver.implicitly_wait(sec)
 
     def get_name(self):
         return self.selector.by_xpath('//*[@id="ember59"]/div[2]/div[2]/div[1]/ul[1]/li[1]').text
@@ -172,7 +182,7 @@ class LinkedinUserInfo(object):
         show_el = self.selector.by_xpath('//*[@id="line-clamp-show-more-button"]')
         self.close_pane()
         if show_el:
-            show_el.click()
+            self.click_element(show_el, 2)
         el = self.selector.by_xpath('//p[@class="pv-about__summary-text mt4 t-14 ember-view"]', nullable=True)
         return el.text if el else el
 
@@ -184,8 +194,7 @@ class LinkedinUserInfo(object):
             self.scroll_to_element(item)
             if re.match(r'显示*', item.text):
                 try:
-                    item.click()
-                    time.sleep(1)
+                    self.click_element(item, 1)
                     break
                 except Exception as e:
                     self.scroll_to_element(item)
@@ -231,7 +240,7 @@ class LinkedinUserInfo(object):
         contacts = []
         contact_el = self.driver.find_element_by_link_text("联系方式")
         self.scroll_to_element(contact_el)
-        contact_el.click()
+        self.click_element(contact_el)
         contact_el = self.driver.find_element_by_xpath('//div[@class="pv-profile-section__section-info section-info"]')
         items = contact_el.find_elements_by_css_selector('section.pv-contact-info__contact-type')
         for item in items:
@@ -248,14 +257,16 @@ class LinkedinUserInfo(object):
         url = path.join(self.url, "detail/interests/influencers/")
         self.driver.get(url)
         followers = []
-        follower_el = self.xpath('//ul[@class="entity-list row"]')
-        TouchActions(self.driver).scroll_from_element(follower_el, 0, 5000).perform()
+        follower_el = self.selector.by_xpath('//ul[@class="entity-list row"]/../../div/../../div')
+        self.selector.scroll_lazy_load(follower_el)
+        # TouchActions(self.driver).scroll_from_element(follower_el, 0, 5000).perform()
         items = follower_el.find_elements_by_css_selector('li.entity-list-item')
         for item in items:
             followers.append(item.find_element_by_css_selector('a.pv-interest-entity-link').get_attribute('href'))
         self.xpath(
             '//button[@class="artdeco-modal__dismiss artdeco-button artdeco-button--circle artdeco-button--muted artdeco-button--2 artdeco-button--tertiary ember-view"]').click()
         return followers
+
 
     def get_avatar(self):
         a_el = self.selector.by_xpath(
@@ -279,8 +290,8 @@ class LinkedinUserInfo(object):
         if btn:
             try:
                 self.scroll_to_element(btn)
-                btn.click()
-                time.sleep(1)
+                self.click_element(btn)
+                self.sleep(2)
             except Exception as e:
                 pass
         self._show_all_recommendation()
@@ -294,8 +305,7 @@ class LinkedinUserInfo(object):
         if not btn:
             return []
         self.scroll_to_element(btn)
-        btn.click()
-        time.sleep(2)
+        self.click_element(btn)
         self._show_all_recommendation()
         items = self.selector.by_all_xpath('//h2[text()="推荐信"]/../../div/div//ul/li')
         all_rec = []
@@ -306,9 +316,14 @@ class LinkedinUserInfo(object):
             rec.desc = self.selector.by_xpath('div/a//p', with_element=item)
             show = self.selector.by_xpath('div/blockquote//a[text()="更多"]', with_element=item)
             self.scroll_to_element_by_top(item)
-            # if show:
-            #     show.click()
+            window = self.selector.get_window_size()
+            logging.debug('window: {}'.format(window))
+            if show:
+                self.click_element(show)
+                self.driver.implicitly_wait(2)
             rec.text = self.selector.by_xpath('div//blockquote', with_element=item)
+            if rec.text:
+                rec.text = rec.text.replace('收起', '')
             all_rec.append(rec.to_json())
         return list(filter(lambda item: item['name'] or item['desc'] or item['text'], all_rec))
 
@@ -320,6 +335,29 @@ class LinkedinUserInfo(object):
             'receive': self._get_recommendation('已收到'),
             'send': self._get_recommendation('已发出')
         }
+
+    def get_skill(self):
+        show = self.selector.by_xpath('//h2[text()="技能认可"]/../../..//button')
+        if show and re.match('.*展开.*', show.text):
+            print("click")
+            self.click_element(show, 2)
+        items = self.selector.by_all_xpath('//h2[text()="技能认可"]/../../..//ol')
+        skill = []
+        for item in items:
+            item_lis = self.selector.by_all_xpath('li', with_element=item)
+            title = self.selector.by_xpath('//ol/../h3|//div/h2[text()="技能认可"]', with_element=item)
+            data = {
+                'title': title.text if isinstance(title, WebElement) else title,
+                'skill': []
+            }
+            for li in item_lis:
+                m_skill = self.Skill()
+                m_skill.name = self.selector.by_xpath('div/div//a/span[1]', with_element=li)
+                m_skill.number = self.selector.by_xpath('div/div//a/span[2]', with_element=li)
+                m_skill.url = self.selector.by_xpath('div/div//a', with_element=li).get_attribute('href')
+                data['skill'].append(m_skill.to_json())
+            skill.append(data)
+        return skill
 
     def to_json(self):
         return {
@@ -334,20 +372,22 @@ class LinkedinUserInfo(object):
 
 class Linkedin(Spider):
 
-    def __init__(self, user, password, storage, cache=None, page=None, cookie_path="./",
+    def __init__(self, user, password, storage,
+                 cache=None,
+                 page=None,
+                 driver=None,
+                 debug=False,
+                 cookie_path="./",
                  cookie_file_name="linkedin.json"):
         super().__init__("linkedin", storage, cache)
+        self.debug = debug
         self.cookie_path = cookie_path
         self.cookie_file_name = cookie_file_name
         self.user = user
         self.password = password
         opt = ChromeOptions()
-        opt.add_experimental_option("w3c", False)
-        # opt.add_argument('--headless')
-        # self.driver = webdriver.Remote(command_executor='http://127.0.0.1:7000/wd/hub',
-        #                                desired_capabilities={'browserName': 'chrome'},
-        #                                options=opt)
-        self.driver = Chrome(options=opt)
+        opt.add_experimental_option('w3c', False)
+        self.driver = driver or Chrome(options=opt)
         self.selector = Selector(self.driver)
         self.page = page
         self.cache.push(self.page)
@@ -359,9 +399,8 @@ class Linkedin(Spider):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         save(self.cookie_path, self.cookie_file_name, json.dumps(self.driver.get_cookies(), ensure_ascii=False))
-        if self.driver:
-            pass
-            # self.driver.quit()
+        if not self.debug and self.driver:
+            self.driver.quit()
 
     def load_cookies(self):
         driver = self.driver
@@ -396,10 +435,12 @@ class Linkedin(Spider):
         with LinkedinUserInfo(driver, self.selector) as user:
             # print(user.to_json())
             # self.storage.save(self.name, user.to_json())
-            save('./', 'test.json', json.dumps(user.get_recommendation()))
+
+            # save('./', 'test.json', json.dumps(user.get_skill()))
             # print(user.get_recommendation())
-            # for item in user.get_follower():
-            #     self.cache.push(item)
+            for item in user.get_follower():
+                # self.cache.push(item)
+                pass
 
     def visit_user_info(self, url):
         if parse.urlparse(url).path.startswith("/in"):

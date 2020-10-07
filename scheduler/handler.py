@@ -155,7 +155,7 @@ class RemoteClientHandler(Handler):
         def invoke(self, *args, **kwargs):
             func = getattr(self.instance, self.method_name)
             if not callable(func):
-                raise TypeError('not callable')
+                raise TypeError('Not callable')
             return func(*args, **kwargs)
 
     def __init__(self, decoder: DeCoder, encoder: EnCoder):

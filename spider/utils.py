@@ -2,8 +2,29 @@ import os
 import json
 import logging as _logging
 
-
 logging = _logging.getLogger(__name__)
+
+
+class DynamicAttributes(object):
+
+    def __init__(self, attr_dict: dict):
+        self.__dict__.update(attr_dict)
+
+    def attrs(self, attrs: dict):
+        self.__dict__.update(attrs)
+
+    def __getattr__(self, item):
+        return self.__dict__.get(item)
+
+    def __setattr__(self, key, value):
+        self.__dict__.__setattr__(key, value)
+
+    def __repr__(self):
+        return str(self.__dict__)
+
+
+def dynamic_attr(attr_dict):
+    return DynamicAttributes(attr_dict)
 
 
 def save(path, filename, data):
@@ -37,5 +58,7 @@ def catcher(capture=True, default_value=None):
                     logging.debug("%s:%s args: %s, kwargs: %s" % (invoke.__name__, str(e), str(args), str(kwargs)))
                     return _default
                 raise e
+
         return try_catch
+
     return wrapper
