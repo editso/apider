@@ -85,5 +85,5 @@ class Selector(object):
     def by_all_elector(self, selector, **kwargs):
         return self.find_elements(By.CSS_SELECTOR, selector, **kwargs)
 
-    def by_id(self, element_id, **kwargs):
+    def by_id(self, element_id, with_element=None, **kwargs):
         return self.find_element(By.ID, element_id, **kwargs)

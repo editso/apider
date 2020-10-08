@@ -165,7 +165,7 @@ class RemoteScheduler(Scheduler):
         try:
             self._workers.append(worker)
             self._workings.remove(worker)
-        except Exception as e:
+        except Exception:
             pass
 
     def register(self, host, port):

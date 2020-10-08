@@ -1,6 +1,76 @@
 from .spider import Cache
 from queue import Queue
 import redis
+from spider.spider import ElasticStorage
+from .utils import dynamic_attr, get_localtime
+
+
+class ElasticCache(Cache):
+    stat = {
+        'wait': 'wait',
+        'queue': 'queue',
+        'failure': 'failure',
+        'success': 'success'
+    }
+
+    def __init__(self, cache_name, unique_key, max_size=10, *args, **kwargs):
+        if not isinstance(unique_key, str):
+            raise TypeError("Need a unique key")
+        self._cache = ElasticStorage(*args, **kwargs)
+        self._cache_name = cache_name
+        self._cur_data = QueueCache()
+        self._dynamic = dynamic_attr(self.stat)
+        self._max_size = max_size
+        self._unique_key = unique_key
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._cur_data.size() > 0:
+            self.reset_data(self._cache_name)
+
+    def reset_data(self, index):
+        while self._cur_data.size() > 0:
+            data = self._cur_data.pop()
+            self._cache.update(index, data['_id'], {
+                'cache_stat': self._dynamic.wait
+            })
+
+    def push(self, value, **kwargs):
+        index = kwargs.get('cache_name', self._cache_name)
+        data = self._cache.term_query(index, query={
+            "data.{}".format(self._unique_key): value.get(self._unique_key)
+        })
+        print('match',data)
+        if data['hits']['total']['value'] > 0:
+            return
+        self._cache.save(index, {
+            'date': get_localtime(),
+            'cache_stat': self._dynamic.wait,
+            'data': value
+        })
+
+    def _load_elastic_data(self, index):
+        data = self._cache.terms_query(index, query={
+            'cache_stat': [
+                self._dynamic.wait,
+                self._dynamic.failure
+            ],
+        }, size=self._max_size)
+        data = dynamic_attr(data)
+        for item in data.hits['hits']:
+            self._cache.update(index, item['_id'], {
+                'cache_stat': self._dynamic.queue,
+                'date': get_localtime()
+            })
+            self._cur_data.push(item)
+
+    def pop(self, **kwargs):
+        if self.size() <= 0:
+            index = kwargs.get('cache_name', self._cache_name)
+            self._load_elastic_data(index)
+        return self._cur_data.pop() if self.size() > 0 else None
+
+    def size(self):
+        return self._cur_data.size()
 
 
 class RedisCache(Cache):

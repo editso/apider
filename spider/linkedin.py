@@ -1,16 +1,9 @@
-import json
 import logging
-from multiprocessing import Process
 from os import path
-from queue import Queue
 from urllib import parse
 
-from selenium.common.exceptions import *
 from selenium.webdriver import Chrome, TouchActions, ChromeOptions, ActionChains
-from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
-
-from selenium import webdriver
 
 from .spider import Spider
 from .utils import *
@@ -148,17 +141,6 @@ class LinkedinUserInfo(object):
         if pane:
             self.click_element(pane)
 
-    def xpath(self, xpath, nullable=False):
-        try:
-            return self.driver.find_element_by_xpath(xpath)
-        except NoSuchElementException as e:
-            if nullable:
-                return None
-            raise e
-
-    def css(self, selector):
-        return self.driver.find_element_by_css_selector(selector)
-
     def scroll(self, x, y):
         self.touch.scroll(x, y).perform()
 
@@ -262,7 +244,7 @@ class LinkedinUserInfo(object):
         items = follower_el.find_elements_by_css_selector('li.entity-list-item')
         for item in items:
             followers.append(item.find_element_by_css_selector('a.pv-interest-entity-link').get_attribute('href'))
-        self.xpath(
+        self.selector.by_xpath(
             '//button[@class="artdeco-modal__dismiss artdeco-button artdeco-button--circle artdeco-button--muted artdeco-button--2 artdeco-button--tertiary ember-view"]').click()
         return followers
 
@@ -290,7 +272,7 @@ class LinkedinUserInfo(object):
                 self.scroll_to_element(btn)
                 self.click_element(btn)
                 self.sleep(2)
-            except Exception as e:
+            except Exception:
                 pass
         self._show_all_recommendation()
 

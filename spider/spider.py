@@ -46,7 +46,15 @@ class ElasticStorage(Storage):
                                  verify_certs=verify_certs,
                                  ports=ports)
 
+    def index_exists(self, index):
+        return self._es.indices.exists(index=index)
+
+    def index_create(self, index):
+        if not self.index_exists(index):
+            self._es.indices.create(index)
+
     def save(self, index, data):
+        self.index_create(index)
         self._es.index(index=index, body=data)
 
     def put_mapping(self, index, properties):
@@ -61,13 +69,45 @@ class ElasticStorage(Storage):
             return True
         return False
 
+    def update(self, index, e_id, body):
+        self.index_create(index)
+        self._es.update(index, e_id, body={
+            'doc': body
+        })
+
+    def update_all(self, index, hits: list, update_terms):
+        for item in hits:
+            item = dynamic_attr(item)
+            self.update(index, item._id, update_terms)
+
     def query(self, index, *args, **kwargs):
         query = kwargs.get('query', {})
-        del kwargs['query']
+        try:
+            del kwargs['query']
+        except Exception:
+            pass
+        return self.search(index, query=query)
+
+    def search(self, index, query, *args, **kwargs):
+        self.index_create(index)
+        print(query)
         return self._es.search(index=index, body={
-            'query': {
-                'term': query
-            }
+            'query': query
+        }, *args, **kwargs)
+
+    def terms_query(self, index, query, *args, **kwargs):
+        return self.search(index=index, query={
+            'terms': query
+        }, *args, **kwargs)
+
+    def match_query(self, index, query, *args, **kwargs):
+        return self.search(index=index, query={
+            'match': query
+        }, *args, **kwargs)
+
+    def term_query(self, index, query, *args, **kwargs):
+        return self.search(index, query={
+            'term': query
         }, *args, **kwargs)
 
 
@@ -75,6 +115,11 @@ class Cache(object):
     """
     缓存
     """
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
     def push(self, value):
         pass

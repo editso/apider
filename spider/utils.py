@@ -3,7 +3,7 @@ import json
 import requests
 import base64
 import logging as _logging
-
+import time
 
 logging = _logging.getLogger(__name__)
 
@@ -67,8 +67,19 @@ def catcher(capture=True, default_value=None):
     return wrapper
 
 
+def remove_url_end(url):
+    url = str(url)
+    while len(url) > 1 and url[-1] == '/':
+        url = url[:-1]
+    return url
+
+
 def image_base64(url, *args, **kwargs):
     data = requests.get(url, *args, **kwargs)
     if not data.ok:
         return None
     return base64.b64encode(data.content)
+
+
+def get_localtime(mat='%Y-%m-%d/%H:%M:%S'):
+    return time.strftime(mat, time.localtime())
