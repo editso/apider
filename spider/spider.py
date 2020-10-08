@@ -1,11 +1,10 @@
 from logging import *
-from urllib import parse
-from urllib.error import HTTPError
 import json
-import requests
 from elasticsearch import Elasticsearch
-from base64 import b64decode
 from .utils import dynamic_attr
+import urllib3
+
+urllib3.disable_warnings()
 
 
 class Storage:
@@ -44,6 +43,7 @@ class ElasticStorage(Storage):
                                  http_auth=(user, password),
                                  scheme=scheme,
                                  verify_certs=verify_certs,
+                                 ssl_show_warn = None,
                                  ports=ports)
 
     def index_exists(self, index):
@@ -53,9 +53,10 @@ class ElasticStorage(Storage):
         if not self.index_exists(index):
             self._es.indices.create(index)
 
-    def save(self, index, data):
+    def save(self, index, data, e_id=None):
         self.index_create(index)
-        self._es.index(index=index, body=data)
+        self._es.index(index=index, id=e_id, body=data)
+        self.force_update(index)
 
     def put_mapping(self, index, properties):
         self._es.indices.put_mapping(index=index, body=properties)
@@ -69,11 +70,15 @@ class ElasticStorage(Storage):
             return True
         return False
 
+    def force_update(self, index):
+        self._es.indices.flush(index=index, force=True)
+
     def update(self, index, e_id, body):
         self.index_create(index)
         self._es.update(index, e_id, body={
             'doc': body
         })
+        self.force_update(index)
 
     def update_all(self, index, hits: list, update_terms):
         for item in hits:
@@ -90,7 +95,6 @@ class ElasticStorage(Storage):
 
     def search(self, index, query, *args, **kwargs):
         self.index_create(index)
-        print(query)
         return self._es.search(index=index, body={
             'query': query
         }, *args, **kwargs)
@@ -110,11 +114,18 @@ class ElasticStorage(Storage):
             'term': query
         }, *args, **kwargs)
 
+    def get(self, index, e_id, *args, **kwargs):
+        try:
+            return self._es.get(index, id=e_id, *args, **kwargs)
+        except Exception:
+            return None
+
 
 class Cache(object):
     """
     缓存
     """
+
     def __enter__(self):
         return self
 

@@ -1,12 +1,10 @@
 from spider import *
 from scheduler import *
-import logging
 import multiprocessing
 from selenium import webdriver
-import asyncio
 import queue
-import account
-import os.path as path
+import hashlib
+import json
 
 
 @thread()
@@ -78,19 +76,27 @@ if __name__ == "__main__":
         'ports': 9200,
         'scheme': 'https'
     }
-    with ElasticCache("cache", 'url', **conf) as es:
-        storage = ElasticStorage(**conf)
-    # print('ex: ',storage.index_exists('cache'))
-    #     es.push({
-    #         'url': remove_url_end('https://www.linkedin.com/in/theahmadimam/')
-    #     })
-        es.push({
-            'url': remove_url_end('https://www.linkedin.com/in/reidhoffman/')
-        })
-        print(es.pop())
-        ports = (9999, 9991)
-        p_server = multiprocessing.Process(target=start_server, args=ports)
-        scheduler = multiprocessing.Process(target=start_scheduler, args=ports)
+    data = json.dumps(conf, ensure_ascii=False)
+    es = elastic_cache('cache', 'url', **conf)
+
+    es.push({
+        'url': remove_url_end('https://www.linkedin.com/in/reidhoffman/')
+    })
+    es.push({
+        'url': remove_url_end('https://www.linkedin.com/in/reidhoffma/')
+    })
+    es.push({
+        'url': remove_url_end('https://www.linkedin.com/in/reidhoffm/')
+    })
+
+    print(es.pop())
+    print(es.pop())
+    ports = (9999, 9991)
+
+    # p_server = multiprocessing.Process(target=start_server, args=ports)
+    # scheduler = multiprocessing.Process(target=start_scheduler, args=ports)
     # p_server.start()
-        time.sleep(2)
+    # time.sleep(2)
     # scheduler.start()
+
+    es.reset_data()

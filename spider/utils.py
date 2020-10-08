@@ -4,6 +4,7 @@ import requests
 import base64
 import logging as _logging
 import time
+import hashlib
 
 logging = _logging.getLogger(__name__)
 
@@ -83,3 +84,8 @@ def image_base64(url, *args, **kwargs):
 
 def get_localtime(mat='%Y-%m-%d/%H:%M:%S'):
     return time.strftime(mat, time.localtime())
+
+
+def md5_hex_digest(s: str, encode='utf8'):
+    return hashlib.md5(s.encode(encode)).hexdigest()
+

@@ -2,7 +2,8 @@ from .spider import Cache
 from queue import Queue
 import redis
 from spider.spider import ElasticStorage
-from .utils import dynamic_attr, get_localtime
+from .utils import dynamic_attr, get_localtime, md5_hex_digest
+import json
 
 
 class ElasticCache(Cache):
@@ -24,29 +25,26 @@ class ElasticCache(Cache):
         self._unique_key = unique_key
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._cur_data.size() > 0:
+        if self.size() > 0:
             self.reset_data(self._cache_name)
 
-    def reset_data(self, index):
+    def reset_data(self, index=None):
         while self._cur_data.size() > 0:
             data = self._cur_data.pop()
-            self._cache.update(index, data['_id'], {
+            self._cache.update(index or self._cache_name, data['_id'], {
                 'cache_stat': self._dynamic.wait
             })
 
     def push(self, value, **kwargs):
         index = kwargs.get('cache_name', self._cache_name)
-        data = self._cache.term_query(index, query={
-            "data.{}".format(self._unique_key): value.get(self._unique_key)
-        })
-        print('match',data)
-        if data['hits']['total']['value'] > 0:
-            return
-        self._cache.save(index, {
-            'date': get_localtime(),
-            'cache_stat': self._dynamic.wait,
-            'data': value
-        })
+        e_id = md5_hex_digest(json.dumps(value, ensure_ascii=False))
+        data = self._cache.get(index, e_id=e_id, _source=True)
+        if not data:
+            self._cache.save(index, {
+                'date': get_localtime(),
+                'cache_stat': self._dynamic.wait,
+                'data': value
+            }, e_id=e_id)
 
     def _load_elastic_data(self, index):
         data = self._cache.terms_query(index, query={
@@ -112,3 +110,8 @@ class QueueCache(Cache):
 
     def size(self):
         return self._queue.qsize()
+
+
+def elastic_cache(*args, **kwargs):
+    with ElasticCache(*args, **kwargs) as es:
+        return es
