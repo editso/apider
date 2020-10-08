@@ -21,6 +21,9 @@ class Response(object):
         self.err = err
         self.code = code
 
+    def __repr__(self):
+        return str(self.__dict__)
+
 
 class DeCoder(object):
     def decoder(self, d_bytes: bytes, cls):

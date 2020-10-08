@@ -11,7 +11,8 @@ def thread(name=None):
         def set_args(*s_args, **s_kwargs):
             if not callable(func):
                 raise TypeError('not function')
-            c_thread = threading.Thread(target=func, name=name, args=s_args, **s_kwargs)
+            c_thread = threading.Thread(
+                target=func, name=name, args=s_args, **s_kwargs)
             c_thread.start()
             return c_thread
 
@@ -40,7 +41,7 @@ def remote_write(sock: socket.socket, data):
         sock.send(data)
         sock.send(b'\r\n')
     except Exception as e:
-        logging.error("Write Error: {}".format(e), exc_info=e)
+        logging.error("Write Error: {}m, sockt: {}".format(e, sock), exc_info=e)
 
 
 class Handler(object):
@@ -114,10 +115,7 @@ class SocketHandler(Handler):
         logging.debug("Remote Invoke {}".format(self._socket))
         remote_write(self._socket, data)
         data = remote_read(self._socket)
-        response = self.decoder().decoder(data, Response)
-        if response and response.code == 200:
-            return response.data
-        return None
+        return self.decoder().decoder(data, Response)
 
     async def async_handler(self, data):
         result = await self._request(data)
@@ -128,12 +126,16 @@ class SocketHandler(Handler):
         if async_handler:
             try:
                 self._request(data).send(None)
-            except StopIteration as e:
-                logging.info("Remote Response: {}".format(e))
-                if self._remote_success:
-                    self._remote_success(e.value)
+            except StopIteration as res:
+                res = res.value
+                logging.info("Remote Response: {}".format(res))
+                if res and res.code == 200:
+                    self._remote_success(res)
+                else:
+                    self._remote_failure()
             except Exception as e:
                 logging.error("Handler Error", exc_info=e)
+                self._remote_failure()
             finally:
                 self._socket.close()
 
@@ -170,7 +172,8 @@ class RemoteClientHandler(Handler):
         services = [item[0] for item in
                     filter(lambda item: not str(item[0]).startswith('_') and callable(item[1]), clazz.__dict__.items())]
         for service in services:
-            self._services.append(self.ServiceDescription(instance_o, clazz.__name__, service))
+            self._services.append(self.ServiceDescription(
+                instance_o, clazz.__name__, service))
 
     def lock_up(self, clazz_name, method_name):
         for service in self._services:
@@ -181,14 +184,20 @@ class RemoteClientHandler(Handler):
     def on_connect(self, sock: socket.socket, addr):
         logging.debug('Handler Remote Invoke: {}'.format(sock))
         request: Request = self._decoder.decoder(remote_read(sock), Request)
-        logging.debug("Invoke Info: {}".format(request))
-        service: RemoteClientHandler.ServiceDescription = self.lock_up(request.cls_name, request.method_name)
+        logging.info("Invoke Info: {}".format(request))
         response = None
+        service = None
+        resp = None
         try:
-            if request and service:
-                data = service.invoke(*request.args, **request.kwargs)
-                response = Response(data=data)
-            data = self._encoder.encoder(response or Response(code=500))
+            if request:
+                service = self.lock_up(request.cls_name, request.method_name)
+            if not service:
+                response = Response(code=404, err="没有合适服务")
+            else:
+                resp = service.invoke(*request.args, **request.kwargs)
+            if resp and not response:
+                response = Response(data=resp)
+            data = self._encoder.encoder(response or Response(err="请求有误", code=500))
             remote_write(sock, data)
         except Exception as e:
             logging.error(e, exc_info=e)

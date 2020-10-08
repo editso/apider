@@ -151,14 +151,15 @@ class RemoteScheduler(Scheduler):
         return self._current_task, self._current_task.get_task()
 
     def _worker_on_failure(self, worker: Worker, task: Task, task_meta, *args, **kwargs):
-        logging.debug('Worker Failure: {}'.format(worker))
+        logging.info('Worker Failure: {}'.format(worker))
         if worker.is_available():
             self._workers.append(worker)
             self._workings.remove(worker)
+            task.re_task(task_meta)
         else:
             self._workings.remove(worker)
             self._error_worker.append(worker)
-            task.re_task(task_meta)
+            
 
     def _worker_on_success(self, worker, *args, **kwargs):
         logging.debug("Worker Finish: {}".format(worker))
@@ -216,6 +217,7 @@ class RemoteScheduler(Scheduler):
             else:
                 remove_worker.append(worker)
                 self._error_worker.append(worker)
+                worker = None
         for err in remove_worker:
             self._workers.remove(err)
         return worker
@@ -231,19 +233,21 @@ class RemoteScheduler(Scheduler):
         task, task_meta = self._get_task()
         running_tasks = []
         while task_meta:
-            if isinstance(task_meta, TaskInfo):
-                logging.debug('Handler Task By {}'.format(task_meta))
-                worker: Worker = self._select_worker()
-                while not worker:
-                    worker = self._select_worker()
-                    time.sleep(1)
-                worker.set_target(task)
-                run_thread = Thread(target=lambda: worker.start_working(task_meta))
-                running_tasks.append(run_thread)
-                run_thread.start()
+            if not isinstance(task_meta,  TaskInfo):
+                continue
+            logging.debug('Handler Task By {}'.format(task_meta))
+            worker: Worker = self._select_worker()
+            while not worker:
+                worker = self._select_worker()
+                time.sleep(1)
+            worker.set_target(task)
+            run_thread = Thread(
+                target=lambda: worker.start_working(task_meta))
+            running_tasks.append(run_thread)
+            run_thread.start()
             task, task_meta = self._get_task() or (None, None)
         for task in running_tasks:
-            task.join()
+            task.join()  # 等待任务完成
         logging.info("Scheduler Task Success")
         self._kill_process()
 

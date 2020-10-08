@@ -5,6 +5,13 @@ from selenium import webdriver
 import queue
 import hashlib
 import json
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
+
+conf = load_json('conf.json')
+
 
 
 @thread()
@@ -38,8 +45,13 @@ class Task(Task):
 
     def __init__(self):
         self.queue = queue.Queue()
-        self.queue.put("https://www.linkedin.com/in/theahmadimam/")
+        self.queue.put("http://vcdf")
+        self.queue.put("1")
+        self.queue.put("3")
         self._pop_url = None
+
+    def re_task(self, task_meta):
+        self.queue.put(task_meta.get_kwargs()['url'])
 
     def has_task(self):
         url = self.queue.get()
@@ -54,49 +66,11 @@ class Task(Task):
     def get_task(self):
         return TaskInfo(Linkin.__name__, Linkin.crawl.__name__, url=self._pop_url, debug=True)
 
-
-def start_server(*ports):
-    for port in ports:
-        server(port)
-
-
-def start_scheduler(*remotes):
+if __name__ == "__main__":
+    data = json.dumps(conf, ensure_ascii=False)
     scheduler = remote_scheduler()
-    for port in remotes:
-        scheduler.register('0.0.0.0', port)
+    server = conf['server']
+    for s in server:
+        scheduler.register(s['host'], s['port'])
     scheduler.add_task(Task())
     scheduler.execute_task()
-
-
-if __name__ == "__main__":
-    conf = {
-        'hosts': "172.16.2.193",
-        'user': 'elastic',
-        'password': 'USA76oBn6ZcowOpofKpS',
-        'ports': 9200,
-        'scheme': 'https'
-    }
-    data = json.dumps(conf, ensure_ascii=False)
-    es = elastic_cache('cache', 'url', **conf)
-
-    es.push({
-        'url': remove_url_end('https://www.linkedin.com/in/reidhoffman/')
-    })
-    es.push({
-        'url': remove_url_end('https://www.linkedin.com/in/reidhoffma/')
-    })
-    es.push({
-        'url': remove_url_end('https://www.linkedin.com/in/reidhoffm/')
-    })
-
-    print(es.pop())
-    print(es.pop())
-    ports = (9999, 9991)
-
-    # p_server = multiprocessing.Process(target=start_server, args=ports)
-    # scheduler = multiprocessing.Process(target=start_scheduler, args=ports)
-    # p_server.start()
-    # time.sleep(2)
-    # scheduler.start()
-
-    es.reset_data()

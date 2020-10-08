@@ -43,7 +43,7 @@ class ElasticStorage(Storage):
                                  http_auth=(user, password),
                                  scheme=scheme,
                                  verify_certs=verify_certs,
-                                 ssl_show_warn = None,
+                                 ssl_show_warn=None,
                                  ports=ports)
 
     def index_exists(self, index):
