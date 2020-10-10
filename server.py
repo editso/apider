@@ -4,15 +4,21 @@ from spider import *
 
 import logging
 
+from selenium import webdriver
+
+from account import AccountManager
+
 
 logging.basicConfig(level=logging.INFO)
-conf = load_json('server.json')
+conf = load_json('server.json') or {}
+
+accounts = load_json('account.json') or []
 
 
 if __name__ == "__main__":
     listen = conf['listen']
-    decoder = JsonDeCoder()
-    encoder = JsonEnCoder()
-    handler = RemoteClientHandler(decoder=decoder, encoder=encoder)  
+    elastic = conf['elasticSearch']
+    handler = get_linkedin_handler(elastic, accounts=accounts)
     for port in listen:
-        Server('0.0.0.0', port, handler=handler).start()
+        server = Server('0.0.0.0', port, handler=handler)
+        server.start()

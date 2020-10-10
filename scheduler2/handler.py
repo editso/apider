@@ -6,21 +6,6 @@ import logging as _logging
 logging = _logging.getLogger(__name__)
 
 
-def thread(name=None):
-    def wrapper(func):
-        def set_args(*s_args, **s_kwargs):
-            if not callable(func):
-                raise TypeError('not function')
-            c_thread = threading.Thread(
-                target=func, name=name, args=s_args, **s_kwargs)
-            c_thread.start()
-            return c_thread
-
-        return set_args
-
-    return wrapper
-
-
 def remote_read(sock: socket.socket, buff_len=1024):
     try:
         data = b''
@@ -152,7 +137,7 @@ class RemoteClientHandler(Handler):
             return self.__str__()
 
         def __str__(self):
-            return '{}::{}'.format(self.clazz_name, self.method_name)
+            return '{}.{}'.format(self.clazz_name, self.method_name)
 
         def invoke(self, *args, **kwargs):
             func = getattr(self.instance, self.method_name)
@@ -172,6 +157,7 @@ class RemoteClientHandler(Handler):
         services = [item[0] for item in
                     filter(lambda item: not str(item[0]).startswith('_') and callable(item[1]), clazz.__dict__.items())]
         for service in services:
+            logging.info("service: {}#{}".format(clazz.__name__, service))
             self._services.append(self.ServiceDescription(
                 instance_o, clazz.__name__, service))
 
@@ -196,7 +182,7 @@ class RemoteClientHandler(Handler):
             else:
                 resp = service.invoke(*request.args, **request.kwargs)
             if resp and not response:
-                response = Response(data=resp)
+                response = Response(data=resp) if not isinstance(resp, Response) else resp
             data = self._encoder.encoder(response or Response(err="请求有误", code=500))
             remote_write(sock, data)
         except Exception as e:
@@ -210,3 +196,4 @@ class RemoteClientHandler(Handler):
 
     def on_error(self, sock):
         pass
+

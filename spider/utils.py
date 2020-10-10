@@ -5,6 +5,7 @@ import base64
 import logging as _logging
 import time
 import hashlib
+import random
 
 logging = _logging.getLogger(__name__)
 
@@ -68,6 +69,15 @@ def catcher(capture=True, default_value=None):
     return wrapper
 
 
+def sleep_range(max_rang=5):
+    try:
+        max_rang = abs(int(max_rang))
+    except Exception:
+        max_rang = 5
+    sec = max([1, random.randrange(max_rang)])
+    time.sleep(sec)
+
+
 def remove_url_end(url):
     url = str(url)
     while len(url) > 1 and url[-1] == '/':
@@ -79,7 +89,7 @@ def image_base64(url, *args, **kwargs):
     data = requests.get(url, *args, **kwargs)
     if not data.ok:
         return None
-    return base64.b64encode(data.content)
+    return base64.b64encode(data.content).decode(encoding="utf8")
 
 
 def get_localtime(mat='%Y-%m-%d/%H:%M:%S'):
