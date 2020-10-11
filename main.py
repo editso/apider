@@ -1,52 +1,85 @@
-from spider import *
-from scheduler import *
-import multiprocessing
-from selenium import webdriver
-import queue
-import hashlib
-import json
+import spider
+import scheduler
 import logging
 
 logging.basicConfig(level=logging.INFO)
 
 
-conf = load_json('conf.json') or {}
+class RemoteServerAdapter(scheduler.ConnectorAdapter):
+
+    def __init__(self, servers:list):
+        self._servers = servers
+        self._cur_sock = None
 
 
+    def has_connector(self):
+        sock = scheduler.socket.create_connection(('0.0.0.0', 8080))
+        self._cur_sock = sock
+        return self._cur_sock is not None
+
+    def get(self):
+        return scheduler.RemoteInvokeConnector(self._cur_sock)
+
+    def finish(self, server, task):
+        print(task)
 
 
-class Task(Task):
+class DispatcherListener(scheduler.DispatchListener):
 
-    def __init__(self, cache):
-        if not isinstance(cache, Cache):
-            raise TypeError("Need a Cache")
+    def error(self, request, *args, **kwargs):
+        print("error", request)
+       
+    def success(self, *args, **kwargs):
+        pass
+
+class LinkedinTask(scheduler.Task):
+
+    def __init__(self, cache, *args, **kwargs):
         self._cache = cache
-
-    def re_task(self, task_meta):
-        self._cache.push(task_meta.get_kwargs()['url'])
+        self._url = None
+        self.count =  2
 
     def has_task(self):
-        return self._cache.size() > 0
+        try:
+            if self.count > 2:
+                return False
+            self.count +=1
+            data = self._cache.pop(auto_update=False)
+            print(data)
+            self._url = data['url']
+            return self._url is not None
+        except Exception:
+            return False
 
-    def get_task(self):
-        return TaskInfo("LinkedinService", "crawl", url=self._cache.pop()['url'], debug=False)
+    def next_task(self):
+        return scheduler.make_request(
+            cls_name='LinkedinService',
+            method_name='crawl',
+            url=self._url
+        )
 
 
-if __name__ == "__main__":
-    
-    pass
+elastic = {
+    "hosts": ["172.16.2.193"],
+    "ports": [9200],
+    "scheme": "https",
+    "user": "elastic",
+    "password": "USA76oBn6ZcowOpofKpS"
+}
 
-    # data = json.dumps(conf, ensure_ascii=False)
-    # scheduler = remote_scheduler()
-    # server = conf['server']
-    # elastic = conf['elasticSearch']
-    # cache = ElasticCache('linkedin_cache', 'url', elastic=elastic)
-    # cache.push({
-    #     'url': "https://www.linkedin.com/in/theahmadimam/"
-    # })
-    # for s in server:
-    #     scheduler.register(s['host'], s['port'])
-    # scheduler.add_task(Task(cache=cache))
-    # scheduler.execute_task()
-    # cache.reset_data()
-    
+cache = spider.linkedin_cache(**elastic)
+
+cache.push({
+    'url': 'https://www.linkedin.com/in/theahmadimam/'
+})
+
+# cache.push({
+#     'url': 'https://www.linkedin.com/in/theahmadimam2/'
+# })
+
+dispatcher = scheduler.remote_invoke_dispatcher(RemoteServerAdapter([]))
+dispatcher.add_listener(DispatcherListener())
+ts = scheduler.Scheduler()
+ts.register(LinkedinTask(cache))
+ts.add_dispatcher(dispatcher)
+ts.dispatch()

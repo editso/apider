@@ -44,18 +44,17 @@ class Task(scheduler.Task):
 
     def next_task(self):
         self._queue.get()
-        return scheduler.make_remote("Task", "next_task")
-
+        time.sleep(5)
+        return scheduler.make_request("Task", "next_task")
 
 
 run()
 
 dispatcher = scheduler.remote_invoke_dispatcher(Adapter())
-
 dispatcher.add_listener(Listener())
-
 s = scheduler.Scheduler()
 s.add(dispatcher)
+s.register(Task())
 s.register(Task())
 s.dispatch()
 

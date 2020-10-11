@@ -49,7 +49,23 @@ class Request(object):
 
 
 class Response(object):
-    pass
+
+    code = None
+
+    message = None
+
+    data = None
+
+    def __init__(self, code, message, data):
+        self.code = code
+        self.message = message
+        self.data = data
+
+    def __repr__(self):
+        return str(self.__dict__)
+
+    def __str__(self):
+        return self.__repr__()
 
 
 class DispatchListener(object):
@@ -86,10 +102,16 @@ class TaskQueue(object):
 
     def pop(self) -> Task:
         task_item = None
-        while not task_item:
-            if not self._cur_task or not self._cur_task.has_task():
-                self._cur_task = self._queue.get()
-            task_item = self._cur_task.next_task()
+        while task_item is None:
+            try:
+                if not self._cur_task:
+                    self._cur_task = self._queue.get()
+                if not self._cur_task.has_task():
+                    self._cur_task = None
+                    continue
+                task_item = self._cur_task.next_task()
+            except Exception as e:
+                logging.debug("Get Task Error", exc_info=e)
         return task_item
 
     def push(self, task: Task):
@@ -105,7 +127,7 @@ class Scheduler(object):
         self._task = TaskQueue()
         self._failure_task = []
 
-    def add(self, dispatcher):
+    def add_dispatcher(self, dispatcher):
         """为调度器添加一个分配器
         """
         check_type(dispatcher, Dispatcher)
@@ -126,9 +148,9 @@ class Scheduler(object):
         self._failure_task.append(error)
 
     def _dispatch(self, dispatcher: Dispatcher, task_item):
+        logging.info("dispatche: {}".format(task_item))
         try:
             dispatcher.dispatch(task_item)
-            tasks = dispatcher.error_tasks()
         except Exception as e:
             logging.debug("Dispatch Task Error: {}".format(e))
             self._task_error(self.Error(
@@ -200,10 +222,13 @@ class JsonDeCoder(DeCoder):
 
 class ConnectorAdapter(object):
 
+    def has_connector(self):
+        return False
+
     def get(self) -> Connector:
         pass
 
-    def remove(self, connect: Connector) -> Connector:
+    def finish(self, connector: Connector, task_item):
         pass
 
 
@@ -277,21 +302,25 @@ class RemoteInvokeDispatcher(Dispatcher):
 
     @run_thread()
     def _remote_invoke(self, connector: RemoteInvokeConnector, request: Request):
+        _connector = connector
+        _request = request
         try:
-            connector.send_from(request)
+            connector.send_from(_request)
             res = connector.recv_from(Response)
-            if res is None:
-                self._notify_all_litener("error", request)
-                return
-            self._notify_all_litener("success", request)
+            print(res)
+            if res is None  or res.code in [4004, 5000, 5001]:
+                self._notify_all_litener("error", _request)
+            elif res.code == 200:
+                self._notify_all_litener("success", _request)
         except Exception as e:
             logging.debug("Invoke Error", exc_info=e)
-            self._notify_all_litener("error", request)
+            self._notify_all_litener("error", _request)
         finally:
             try:
                 connector.close()
             except Exception:
                 pass
+            self._adapter.finish(_connector, _request)
 
     def _select_connector(self) -> RemoteInvokeConnector:
         remote_invoke = None
@@ -323,7 +352,17 @@ class RemoteInvokeDispatcher(Dispatcher):
             self._remote_invoke(connect, task)
 
     def can_handle(self, task_item):
-        return isinstance(task_item, Request)
+        if not isinstance(task_item, Request):
+            return False
+        while True:
+            try:
+                if self._adapter.has_connector():
+                    return True
+            except Exception as e:
+                logging.debug("Connector Error:{}".format(e), exc_info=e)
+            with self._mutex:
+                self._mutex.wait(10)  # 等待10秒,防止僵尸
+        return True
 
     def add_listener(self, listener):
         check_type(listener, DispatchListener)
@@ -365,6 +404,7 @@ class InvokeService(object):
         try:
             return self._func(self._instance, *args, **kwargs)
         except Exception as e:
+            logging.debug("Service Invoke error", exc_info=e)
             return None
 
     def __repr__(self):
@@ -406,24 +446,30 @@ class RemoteInvokeServer(TcpServer):
     @run_thread()
     def handler_remote_invoke(self, conner: RemoteInvokeConnector):
         try:
+            resp = None
             req: Request = conner.recv_from(Request)
-            print(req)
-            service = self.lock_up(req.cls_name, req.method_name)
-            print(service)
-            # print(service)
-            pass
-            # if not service:
-            #     resp = Response()
-            # resp = None
-            # if not service:
-            #     resp = None
-            # else:
-            #     data = service.invoke(*req.args, **req.kwargs)
-            #     print(data)
+            service = None
+            result = None
+            if not req:
+                resp = make_response(message="请求有误", code=5000)
+            else:
+                service = self.lock_up(req.cls_name, req.method_name)
+            if service:
+                result = service.invoke(*req.args, **req.kwargs)
+                print(result)
+            elif not resp:
+                resp = make_response(data=req, message="找不到服务", code=4004)
+            if isinstance(result, Response):
+                resp = result
+            conner.send_from(resp)
         except Exception as e:
-            raise e
+            logging.debug("Invoke error: {}".format(e))
+            return make_response(data=None, message="未知错误", code=5001)
+        finally:
+            conner.close()
 
     def start(self):
+        logging.info("Started Server, {}:{}".format(self.host, self.port))
         while True:
             sock, addr = self.socket.accept()
             remote_conner = RemoteInvokeConnector(sock)
@@ -435,5 +481,9 @@ def remote_invoke_dispatcher(adapter: ConnectorAdapter):
     return RemoteInvokeDispatcher(adapter)
 
 
-def make_remote(cls_name, method_name, *args, **kwargs):
+def make_request(cls_name, method_name, *args, **kwargs):
     return Request(cls_name, method_name, *args, **kwargs)
+
+
+def make_response(data, message=None, code=200):
+    return Response(code=code, message=message, data=data)

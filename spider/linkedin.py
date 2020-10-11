@@ -5,7 +5,8 @@ from urllib import parse
 from selenium.webdriver import Chrome, TouchActions, ChromeOptions, ActionChains, Remote
 from selenium.webdriver.remote.webelement import WebElement
 
-from .spider import Spider, Cache, ElasticStorage, Storage
+from .spider import Spider, Cache, ElasticStorage, Storage, make_crawl_log
+import spider
 from .cache import ElasticCache
 from .utils import *
 from .selector import Selector
@@ -13,15 +14,15 @@ import re
 import time
 
 from account import AccountManager
-from scheduler import Response, RemoteClientHandler, JsonDeCoder, JsonEnCoder
+# from scheduler import Response, RemoteClientHandler, JsonDeCoder, JsonEnCoder
 
 
 class LinkedAccount(AccountManager):
 
-    def __init__(self, elastic):
+    def __init__(self, *args, **kwargs):
         super().__init__()
         self._index_name = "linkedin_account"
-        self._storage: ElasticStorage = elastic
+        self._storage: ElasticStorage = ElasticStorage(*args, **kwargs)
 
     def add(self, account, password, ignore_ivalid=False):
         if not account:
@@ -45,7 +46,7 @@ class LinkedAccount(AccountManager):
     def get(self):
         data = None
         while not data or data['hits']['total']['value'] <= 0:
-            time.sleep(1)
+            time.sleep(2)
             data = self._get_account()
         return data['hits']['hits'][0]['_source']
 
@@ -433,30 +434,40 @@ class LinkedinUserInfo(object):
         }
 
 
+class LinkedinAdapter(object):
+
+    def get_account(self) -> AccountManager:
+        pass
+
+    def get_cache(self) -> Cache:
+        pass
+
+    def get_storage(self) -> Storage:
+        pass
+
+    def get_driver(self):
+        pass
+
+
 class Linkedin(Spider):
 
-    def __init__(self, user, password, storage,
-                 cache=None,
-                 page=None,
-                 driver=None,
+    def __init__(self,
+                 page,
+                 adapter: LinkedinAdapter,
                  debug=False,
                  cookie_path="./",
                  cookie_file_name="linkedin.json"):
-        super().__init__("linkedin", storage, cache)
+        super().__init__("linkedin")
+        self._adapter = adapter
         self.debug = debug
         self.cookie_path = cookie_path
         self.cookie_file_name = cookie_file_name
-        self.user = user
-        self.password = password
-        opt = ChromeOptions()
-        opt.add_experimental_option('w3c', False)
-        self.driver = driver or Chrome(options=opt)
+        self.driver = self._adapter.get_driver()
         self.selector = Selector(self.driver)
         self.page = page
 
     def quit(self):
         self.driver.close()
-        logging.info("爬取完成")
         super().quit()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -477,49 +488,87 @@ class Linkedin(Spider):
     def check_login(self, call_count=0):
         driver = self.driver
         url = parse.urlparse(driver.current_url)
+        account = self._adapter.get_account().get()
         if url.path == '/authwall':
             login = driver.find_element_by_xpath(
                 "/html/body/main/div/div/form[2]/section/p/a")
             login.click()
             driver.find_element_by_xpath(
-                '//*[@id="login-email"]').send_keys(self.user)
+                '//*[@id="login-email"]').send_keys(account['account'])
             driver.find_element_by_xpath(
-                '//*[@id="login-password"]').send_keys(self.password)
+                '//*[@id="login-password"]').send_keys(account['password'])
             driver.find_element_by_xpath('//*[@id="login-submit"]').click()
-        elif url.path.startswith("/checkpoint/challengesV2"):
+        if url.path.startswith("/checkpoint/challengesV2") or driver.current_url != self.page:
+            self._adapter.get_account().invalid(account['account'])
             driver.get("https://www.linkedin.com/authwall")
             if call_count == 2:
                 return False
             self.check_login(call_count=call_count + 1)
-        if self.driver.current_url != self.page:
-            return False
         return True
 
     def crawl_user_info(self):
-        if not self.check_login():
-            logging.info("Crawl Error Login Failure")
-            return False
+        log = make_crawl_log(self.page)
+        stat = dynamic_attr(spider.code)
+        try:
+            if not self.check_login():
+                log.code = stat.failure
+                log.messgae = "登陆失败"
+                return log
+        except Exception as e:
+            log.code = stat.failure
+            log.messgae = "登陆失败"
+            return log
         driver = self.driver
-        driver.implicitly_wait(5)
+        log.method = []
         with LinkedinUserInfo(driver, self.selector) as user:
-            self.storage.save(self.name, user.to_json())
-            self.storage.save("{}_recommend".format(self.name), {
-                "person": user.url,
-                "data": user.get_recommendation()
-            })
-            skill = user.get_skill()
-            self.storage.save("{}_skill".format(self.name), {
-                "person": user.url,
-                "data": skill
-            })
-            for item in user.get_follower():
-                self.cache.push({
-                    'url': item
-                })
-            for item in skill:
-                for i in item.get('skill'):
-                    print(i)
-        return True
+            user_info = None
+            recommend = None
+            skill = None
+            follower = None
+            try:
+                user_info = user.to_json()
+            except Exception:
+                log.method.append('user_info')
+            try:
+                recommend = {
+                    "person": user.url,
+                    "data": user.get_recommendation()
+                }
+            except Exception:
+                log.method.append('recommend')
+            try:
+                skill = {
+                    "person": user.url,
+                    "data": skill
+                }
+            except Exception:
+                log.method.append("skill")
+            try:
+                follower = user.get_follower()
+            except Exception:
+                log.method.append("follower")
+            try:
+                storage = self._adapter.get_storage()
+                cache = self._adapter.get_cache()
+                if user_info:
+                    storage.save(self.name, user_info)
+                if recommend:
+                    storage.save("{}_recommend".format(self.name), recommend)
+                if skill:
+                    storage.save("{}_skill".format(self.name), {
+                        "person": user.url,
+                        "data": skill
+                    })
+                if follower:
+                    for item in follower:
+                        cache.push({
+                            'url': follower
+                        })
+            except Exception as e:
+                log.method.append('save')
+            if len(log.method) > 0:
+                log.code = stat.part
+        return log
 
     def start(self):
         driver = self.driver
@@ -530,49 +579,6 @@ class Linkedin(Spider):
         return self.crawl_user_info()
 
 
-class LinkedinService(object):
 
-    def __init__(self, account: AccountManager = None, cache: Cache = None, storage:Storage=None):
-        if not isinstance(account, AccountManager):
-            raise TypeError("Need a Account")
-        if not isinstance(cache, Cache):
-            raise TypeError("Need a Cache")
-        if not isinstance(storage, Storage):
-            raise TypeError("Need a Storage")
-        self._account = account
-        self._cache = cache
-        self._storage = storage
-
-    def crawl(self, url, **kwargs):
-        # driver = Chrome(options=chrome_options)
-        account = self._account.get()
-        if not account:
-            return Response(err="没有帐号", code=403)
-        chrome_options = ChromeOptions()
-        chrome_options.add_experimental_option('w3c', False)
-        driver = Remote(
-            command_executor='http://172.16.2.129:4444/wd/hub',
-            options=chrome_options
-        )
-        with Linkedin(user=account['account'],
-                      password=account['password'],
-                      storage=self._storage,
-                      **kwargs,
-                      driver=driver,
-                      cache=self._cache,
-                      page=url) as linkedin:
-            linkedin.start()
-        return Response(code=200)
-
-
-def get_linkedin_handler(elastic_conf, decoder=JsonDeCoder(), encoder=JsonEnCoder(), accounts=[]):
-    remote_handler = RemoteClientHandler(decoder=decoder, encoder=encoder)
-    es = ElasticStorage(**elastic_conf)
-    account = LinkedAccount(es)
-    for item in accounts:
-        account.add(item['account'], item['password'])
-    cache = ElasticCache('linkedin_cache', 'url', elastic=elastic_conf)
-    storage = ElasticStorage(**elastic_conf)
-    remote_handler.register(
-        LinkedinService, LinkedinService(account=account, cache=cache, storage=storage))
-    return remote_handler
+def linkedin_cache(*args, **kwargs):
+    return ElasticCache('linkedin_cache', elastic=kwargs, *args)

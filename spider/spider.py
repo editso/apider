@@ -55,7 +55,7 @@ class ElasticStorage(Storage):
 
     def save(self, index, data, e_id=None):
         self.index_create(index)
-        self._es.index(index=index, id=e_id, body=data)
+        self._es.index(index=index, id=e_id, body=data, refresh='wait_for')
         self.force_update(index)
 
     def put_mapping(self, index, properties):
@@ -71,13 +71,13 @@ class ElasticStorage(Storage):
         return False
 
     def force_update(self, index):
-        self._es.indices.flush(index=index, force=True)
+        r = self._es.indices.flush(index=index, force=True)
 
     def update(self, index, e_id, body):
         self.index_create(index)
         self._es.update(index, e_id, body={
             'doc': body
-        })
+        }, refresh='wait_for')
         self.force_update(index)
 
     def update_all(self, index, hits: list, update_terms):
@@ -145,38 +145,37 @@ class Cache(object):
         pass
 
 
+class CrawlLog(object):
+    """爬虫日志"""
+
+    code = None
+
+    messgae = None
+
+    target = None
+
+    method = None
+
+    def __init__(self, code, messgae, target, method):
+        self.code = code
+        self.messgae = messgae
+        self.target = target
+        self.method = method
+
+    def __repr__(self):
+        return str(self.__dict__)
+
+    def __str__(self):
+        return self.__repr__()
+
+
 class Spider(object):
     _storage = None
     _cache = None
 
-    def __init__(self, name, storage, cache):
+    def __init__(self, name):
         self._name = name
-        self._storage = storage
-        self._cache: Cache = cache
-
-    @property
-    def cache(self):
-        return self._cache
-
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def storage(self):
-        return self._storage
-
-    @storage.setter
-    def storage(self, storage):
-        self._storage = storage
-
-    def save(self, data):
-        if isinstance(data, str):
-            data = json.loads(data)
-        elif isinstance(data, set):
-            data = list(data)
-        self.storage.save(self.name, data)
-
+   
     def __enter__(self):
         return self
 
@@ -185,7 +184,18 @@ class Spider(object):
             error("Spider Error")
 
     def quit(self):
-        exit(0)
+        pass
 
     def start(self):
         pass
+
+
+code = {
+    'success': 200, # 成功
+    'failure': 500, # 失败
+    'part': 400 # 部分成功
+}
+
+
+def make_crawl_log(target, messgae=None, code=code['success'],method=None):
+    return CrawlLog(code=code, messgae=messgae, target=target, method=method)
