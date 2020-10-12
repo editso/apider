@@ -54,7 +54,36 @@ def run_timer(interval=10, never=False):
                 pt = threading.Timer(_interval, func, args=args, kwargs=kwargs)
                 pt.start()
                 pt.join()
-                _run = False 
+                _run = False
         return set_args
     return wrapper
 
+
+class TimerProcess(object):
+
+    def __init__(self, target, interval=None,  args=(), kwargs={}):
+        self._interval = interval
+        self._target = target
+        self.args = args
+        self.kwargs = kwargs
+        self._proc = multiprocessing.Process(
+            target=self._proxy_invoke, args=args, kwargs=kwargs)
+        self._result = multiprocessing.Queue()
+
+    def _proxy_invoke(self, *args, **kwargs):
+        res = self._target(*args, **kwargs)
+        self._result.put(res)
+
+    def start_wait_result(self):
+        self._proc.start()
+        try:
+            logging.debug("wait process: {}, pid: {}".format(self._proc.name, self._proc.pid))
+            return self._result.get(timeout=self._interval)
+        except Exception:
+            raise TimeoutError
+        finally:
+            if self._proc.is_alive():
+                self._proc.kill()
+
+def make_timer_process(target, interval, args=(), kwargs={}):
+    return TimerProcess(target, interval=interval, args=args, kwargs=kwargs).start_wait_result()

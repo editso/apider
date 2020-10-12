@@ -5,14 +5,18 @@ import selenium
 
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.ERROR)
 
+
+accounts = spider.load_json('./account.json')
 
 
 class LinkedinAdapter(spider.LinkedinAdapter):
 
     def __init__(self, *args, **kwargs):
         self.account = spider.LinkedAccount(*args, **kwargs)
+        for account in accounts:
+            self.account.add(account['account'], account['password'])
         self.cache = spider.linkedin_cache(**kwargs)
         self.storage = spider.ElasticStorage(**kwargs)
         
@@ -50,8 +54,7 @@ class LinkedinService(object):
                 self._cache.error({
                     'url': spider.remove_url_end(url)
                 })
-            return scheduler.make_response(log, code=log.code)
-
+            return scheduler.make_response(log.target, code=log.code)
 
 elastic = {
     "hosts": ["172.16.2.193"],

@@ -2,7 +2,7 @@ import spider
 import scheduler
 import logging
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 
 class RemoteServerAdapter(scheduler.ConnectorAdapter):
@@ -10,23 +10,25 @@ class RemoteServerAdapter(scheduler.ConnectorAdapter):
     def __init__(self, servers:list):
         self._servers = servers
         self._cur_sock = None
+        self._connect = True
 
     def has_connector(self):
         sock = scheduler.socket.create_connection(('0.0.0.0', 8080))
         self._cur_sock = sock
-        return self._cur_sock is not None
+        return self._cur_sock is not None and self._connect
 
     def get(self):
+        self._connect = False
         return scheduler.RemoteInvokeConnector(self._cur_sock)
 
     def finish(self, server, task):
-        print(task)
+        self._connect = True
 
 
 class DispatcherListener(scheduler.DispatchListener):
 
     def error(self, request, *args, **kwargs):
-        print("error", request)
+        pass
        
     def success(self, *args, **kwargs):
         pass
@@ -36,15 +38,11 @@ class LinkedinTask(scheduler.Task):
     def __init__(self, cache, *args, **kwargs):
         self._cache = cache
         self._url = None
-        self.count =  0
+        self.count =  2
 
     def has_task(self):
         try:
-            if self.count > 2:
-                return False
-            self.count +=1
-            data = self._cache.pop(auto_update=False)
-            print(data)
+            data = self._cache.pop()
             self._url = data['url']
             return self._url is not None
         except Exception:

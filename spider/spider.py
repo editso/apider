@@ -1,7 +1,7 @@
 from logging import *
 import json
 from elasticsearch import Elasticsearch
-from .utils import dynamic_attr
+from .utils import dynamic_attr, remove_url_end, md5_hex_digest
 import urllib3
 
 urllib3.disable_warnings()
@@ -12,15 +12,9 @@ class Storage:
     存储基类
     """
 
-    def save(self, name, data):
+    def save(self, index, data, e_id=None):
         """
         子类实现保存方法
-        """
-        pass
-
-    def save_stream(self, name, binary: bytes):
-        """
-        数据流文件
         """
         pass
 
@@ -61,14 +55,8 @@ class ElasticStorage(Storage):
     def put_mapping(self, index, properties):
         self._es.indices.put_mapping(index=index, body=properties)
 
-    def save_stream(self, name, binary: bytes):
-        pass
-
-    def exists(self, index, query, *args, **kwargs):
-        data = dynamic_attr(self.query(index, query=query))
-        if data._shards['total'] >= 1:
-            return True
-        return False
+    def exists(self, index, unique, *args, **kwargs):
+        return self._es.exists(index, id=unique)
 
     def force_update(self, index):
         r = self._es.indices.flush(index=index, force=True)
@@ -170,18 +158,33 @@ class CrawlLog(object):
 
 
 class Spider(object):
-    _storage = None
-    _cache = None
 
-    def __init__(self, name):
+    def __init__(self, name, target):
         self._name = name
-   
+        self._target = target
+
+    @property
+    def target(self):
+        return remove_url_end(self._target)
+
+    @property
+    def name(self):
+        return self._name
+
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type:
             error("Spider Error")
+
+    def unique_id(self, content: str = None):
+        unique_id = None
+        if content and isinstance(content, str):
+            unique_id = "{}::{}".format(content, self.target)
+        else:
+            unique_id = "{}".format(self.target)
+        return md5_hex_digest(unique_id)
 
     def quit(self):
         pass
@@ -191,11 +194,11 @@ class Spider(object):
 
 
 code = {
-    'success': 200, # 成功
-    'failure': 500, # 失败
-    'part': 400 # 部分成功
+    'success': 200,  # 成功
+    'failure': 500,  # 失败
+    'part': 400  # 部分成功
 }
 
 
-def make_crawl_log(target, messgae=None, code=code['success'],method=None):
+def make_crawl_log(target, messgae=None, code=code['success'], method=None):
     return CrawlLog(code=code, messgae=messgae, target=target, method=method)

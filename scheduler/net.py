@@ -50,10 +50,9 @@ class DefaultConnector(Connector):
 
 class Server(object):
 
-    def __init__(self, host, port, handler):
+    def __init__(self, host, port):
         self._host = host
         self._port = port
-        self._handler = handler
 
     @property
     def port(self):
@@ -72,8 +71,8 @@ class Server(object):
 
 class TcpServer(Server):
 
-    def __init__(self, host, port, handler, listen=10):
-        super().__init__(host, port, handler)
+    def __init__(self, host, port, listen=10):
+        super().__init__(host, port)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((host, port))

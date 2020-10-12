@@ -53,6 +53,26 @@ class ElasticCache(Cache):
     def push(self, value, **kwargs):
         self._update(value, self._dynamic.wait, **kwargs)
 
+    def reset_stat(self, index, old_stat: list, new_stat):
+        stats = list(old_stat)
+        stats.append(new_stat)
+        for item in stats:
+            if not self.stat.get(item):
+                raise TypeError("Bad Stat")
+        stats.remove(new_stat)        
+        while True:
+            data = self._cache.terms_query(index, query={
+                'cache_stat': list(old_stat)
+            })
+            data = dynamic_attr(data)
+            if data.hits['total']['value'] <= 0:
+                break
+            for item in data.hits['hits']:
+                self._cache.update(index, item['_id'], {
+                    'cache_stat': new_stat,
+                    'date': get_localtime()
+                })
+
     def _load_elastic_data(self, index, auto_update=True, **kwargs):
         data = self._cache.terms_query(index, query={
             'cache_stat': [

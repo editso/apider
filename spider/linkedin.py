@@ -223,7 +223,7 @@ class LinkedinUserInfo(object):
             '//p[@class="pv-about__summary-text mt4 t-14 ember-view"]', nullable=True)
         return el.text if el else el
 
-    def _show_all_jobs(self):
+    def _show_all_jobs(self, click_show=False):
         items = self.selector.by_all_xpath(
             '//h2[text()= "工作经历"]/../../ul/../div/button')
         if items.__len__() <= 0:
@@ -231,10 +231,11 @@ class LinkedinUserInfo(object):
         for item in items:
             self.scroll_to_element(item)
             if re.match(r'显示*', item.text):
+                click_show = True
                 self.click_element(item, 5)
-            elif re.match(r'收起*', item.text):
+            elif re.match(r'收起*', item.text) or not click_show:
                 return
-        self._show_all_jobs()
+        self._show_all_jobs(click_show)
 
     def get_jobs(self):
         jobs = []
@@ -318,7 +319,7 @@ class LinkedinUserInfo(object):
             '//img[@class="pv-top-card__photo presence-entity__image EntityPhoto-circle-9 lazy-image ember-view"]')
         return image_base64(a_el.get_attribute('src')) if a_el else None
 
-    def _show_all_recommendation(self):
+    def _show_all_recommendation(self, click_show=False):
         items = self.selector.by_all_xpath(
             '//h2[text()="推荐信"]/../../div/div//button[text()="展开"]|//h2[text()="推荐信"]/../../div/div//button')
         if items.__len__() < 0:
@@ -327,10 +328,11 @@ class LinkedinUserInfo(object):
         for item in items:
             btn = item
             if re.match('展开', btn.text):
+                click_show = True
                 break
             elif re.match('其他.*', btn.text):
                 break
-            elif re.match('收起.*', btn.text):
+            elif re.match('收起.*', btn.text) or not click_show:
                 return
         if btn:
             try:
@@ -338,7 +340,7 @@ class LinkedinUserInfo(object):
                 self.click_element(btn, 5)
             except Exception:
                 pass
-        self._show_all_recommendation()
+        self._show_all_recommendation(click_show)
 
     def _get_recommendation(self, name="已收到"):
         btn = None
@@ -457,7 +459,7 @@ class Linkedin(Spider):
                  debug=False,
                  cookie_path="./",
                  cookie_file_name="linkedin.json"):
-        super().__init__("linkedin")
+        super().__init__("linkedin",  page)
         self._adapter = adapter
         self.debug = debug
         self.cookie_path = cookie_path
@@ -467,14 +469,14 @@ class Linkedin(Spider):
         self.page = page
 
     def quit(self):
-        self.driver.close()
-        super().quit()
+        if self.driver:
+            self.driver.quit()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         save(self.cookie_path, self.cookie_file_name, json.dumps(
             self.driver.get_cookies(), ensure_ascii=False))
         if not self.debug and self.driver:
-            self.driver.quit()
+            self.quit()
 
     def load_cookies(self):
         driver = self.driver
@@ -521,26 +523,36 @@ class Linkedin(Spider):
         driver = self.driver
         log.method = []
         with LinkedinUserInfo(driver, self.selector) as user:
+            storage = self._adapter.get_storage()
+            cache = self._adapter.get_cache()
+            if not storage or not cache:
+                log.code = stat.failure
+                log.messgae = '存储服务错误'
+                return log
             user_info = None
             recommend = None
             skill = None
             follower = None
             try:
-                user_info = user.to_json()
-            except Exception:
+                if not storage.exists(self.name, self.unique_id('user_info')):
+                    user_info = user.to_json()
+            except Exception as e:
+                logging.error("error", exc_info=e)
                 log.method.append('user_info')
             try:
-                recommend = {
-                    "person": user.url,
-                    "data": user.get_recommendation()
-                }
+                if not storage.exists("{}_recommend".format(self.name), self.unique_id('user_recommend')):
+                    recommend = {
+                        "person": user.url,
+                        "data": user.get_recommendation()
+                    }
             except Exception:
                 log.method.append('recommend')
             try:
-                skill = {
-                    "person": user.url,
-                    "data": skill
-                }
+                if not storage.exists("{}_skill".format(self.name), self.unique_id('user_skill')):
+                    skill = {
+                        "person": user.url,
+                        "data": user.get_skill()
+                    }
             except Exception:
                 log.method.append("skill")
             try:
@@ -548,23 +560,24 @@ class Linkedin(Spider):
             except Exception:
                 log.method.append("follower")
             try:
-                storage = self._adapter.get_storage()
-                cache = self._adapter.get_cache()
                 if user_info:
-                    storage.save(self.name, user_info)
+                    storage.save(self.name, user_info,
+                                 e_id=self.unique_id('user_info'))
                 if recommend:
-                    storage.save("{}_recommend".format(self.name), recommend)
+                    storage.save("{}_recommend".format(self.name),
+                                 recommend, e_id=self.unique_id('user_recommend'))
                 if skill:
                     storage.save("{}_skill".format(self.name), {
                         "person": user.url,
                         "data": skill
-                    })
+                    }, e_id=self.unique_id("user_skill"))
                 if follower:
                     for item in follower:
                         cache.push({
-                            'url': follower
+                            'url': item
                         })
             except Exception as e:
+                logging.error('Save Error', exc_info=e)
                 log.method.append('save')
             if len(log.method) > 0:
                 log.code = stat.part
@@ -577,7 +590,6 @@ class Linkedin(Spider):
         driver.refresh()
         time.sleep(2)
         return self.crawl_user_info()
-
 
 
 def linkedin_cache(*args, **kwargs):

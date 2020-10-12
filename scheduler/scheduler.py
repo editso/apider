@@ -1,11 +1,12 @@
 from queue import Queue
 import time
-from .utils import check_type, run_process, run_thread, run_timer
+from .utils import check_type, run_process, run_thread, run_timer, make_timer_process
 import threading
 import logging
 from .net import connect, Connector, TcpServer
 import socket
 import json
+import multiprocessing
 
 
 class Task(object):
@@ -37,12 +38,14 @@ class Request(object):
     method_name = None
     args = None
     kwargs = None
+    timeout = None
 
-    def __init__(self, cls_name=None, method_name=None, *args, **kwargs):
+    def __init__(self, cls_name=None, method_name=None, timeout=None, *args, **kwargs):
         self.cls_name = cls_name
         self.method_name = method_name
         self.args = args
         self.kwargs = kwargs
+        self.timeout = timeout
 
     def __repr__(self):
         return str(self.__dict__)
@@ -56,7 +59,7 @@ class Response(object):
 
     data = None
 
-    def __init__(self, code, message, data):
+    def __init__(self, code=None, message=None, data=None):
         self.code = code
         self.message = message
         self.data = data
@@ -148,7 +151,7 @@ class Scheduler(object):
         self._failure_task.append(error)
 
     def _dispatch(self, dispatcher: Dispatcher, task_item):
-        logging.info("dispatche: {}".format(task_item))
+        logging.debug("dispatche: {}".format(task_item))
         try:
             dispatcher.dispatch(task_item)
         except Exception as e:
@@ -270,7 +273,7 @@ class RemoteInvokeConnector(Connector):
 
     def send_from(self, r: (Request or Response)):
         data = self.encode(r)
-        logging.info("Send: {}".format(data))
+        logging.debug("send: {}".format(data))
         if not self.write(data):
             return False
         return True
@@ -307,11 +310,10 @@ class RemoteInvokeDispatcher(Dispatcher):
         try:
             connector.send_from(_request)
             res = connector.recv_from(Response)
-            print(res)
-            if res is None  or res.code in [4004, 5000, 5001]:
+            if res is None or int(res.code) in [4004, 5000, 5001, 5002]:
                 self._notify_all_litener("error", _request)
-            elif res.code == 200:
-                self._notify_all_litener("success", _request)
+            elif int(res.code) == 200:
+                self._notify_all_litener("success", res, _request)
         except Exception as e:
             logging.debug("Invoke Error", exc_info=e)
             self._notify_all_litener("error", _request)
@@ -423,9 +425,10 @@ class RemoteInvokeServer(TcpServer):
     """远程调用服务端
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, host, port, invoke_timeout=None, *args, **kwargs):
+        super().__init__(host, port)
         self._service = []
+        self._invoke_timeout = invoke_timeout
 
     def lock_up(self, cls_name, method_name):
         for item in self._service:
@@ -445,9 +448,10 @@ class RemoteInvokeServer(TcpServer):
 
     @run_thread()
     def handler_remote_invoke(self, conner: RemoteInvokeConnector):
+        req: Request = None
         try:
             resp = None
-            req: Request = conner.recv_from(Request)
+            req = conner.recv_from(Request)
             service = None
             result = None
             if not req:
@@ -455,15 +459,20 @@ class RemoteInvokeServer(TcpServer):
             else:
                 service = self.lock_up(req.cls_name, req.method_name)
             if service:
-                result = service.invoke(*req.args, **req.kwargs)
-                print(result)
+                result = make_timer_process(
+                    service.invoke, interval=req.timeout or self._invoke_timeout, args=req.args, kwargs=req.kwargs)
             elif not resp:
                 resp = make_response(data=req, message="找不到服务", code=4004)
             if isinstance(result, Response):
                 resp = result
+            else:
+                resp = make_response(data=result)
             conner.send_from(resp)
+        except TimeoutError:
+            logging.debug("Invoke timeout")
+            return make_response(data=req, message="调用超时", code=5002)
         except Exception as e:
-            logging.debug("Invoke error: {}".format(e))
+            logging.debug("Invoke error: {}".format(e), exc_info=e)
             return make_response(data=None, message="未知错误", code=5001)
         finally:
             conner.close()
@@ -481,9 +490,9 @@ def remote_invoke_dispatcher(adapter: ConnectorAdapter):
     return RemoteInvokeDispatcher(adapter)
 
 
-def make_request(cls_name, method_name, *args, **kwargs):
-    return Request(cls_name, method_name, *args, **kwargs)
+def make_request(cls_name, method_name, timeout=None, *args, **kwargs):
+    return Request(cls_name, method_name, timeout=timeout, *args, **kwargs)
 
 
-def make_response(data, message=None, code=200):
+def make_response(data=None, message=None, code=200):
     return Response(code=code, message=message, data=data)
