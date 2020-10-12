@@ -426,6 +426,11 @@ class RemoteInvokeServer(TcpServer):
     """
 
     def __init__(self, host, port, invoke_timeout=None, *args, **kwargs):
+        """
+            invoke_timeout: 默认服务调用超时时间,
+                            为空表示直到服务运行到结束
+                            如果调用方设置了timeout那么此超时时间将会失效
+        """
         super().__init__(host, port)
         self._service = []
         self._invoke_timeout = invoke_timeout
