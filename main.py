@@ -11,7 +11,6 @@ class RemoteServerAdapter(scheduler.ConnectorAdapter):
         self._servers = servers
         self._cur_sock = None
 
-
     def has_connector(self):
         sock = scheduler.socket.create_connection(('0.0.0.0', 8080))
         self._cur_sock = sock
@@ -37,7 +36,7 @@ class LinkedinTask(scheduler.Task):
     def __init__(self, cache, *args, **kwargs):
         self._cache = cache
         self._url = None
-        self.count =  2
+        self.count =  0
 
     def has_task(self):
         try:
@@ -72,10 +71,6 @@ cache = spider.linkedin_cache(**elastic)
 cache.push({
     'url': 'https://www.linkedin.com/in/theahmadimam/'
 })
-
-# cache.push({
-#     'url': 'https://www.linkedin.com/in/theahmadimam2/'
-# })
 
 dispatcher = scheduler.remote_invoke_dispatcher(RemoteServerAdapter([]))
 dispatcher.add_listener(DispatcherListener())
