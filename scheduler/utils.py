@@ -71,16 +71,24 @@ class TimerProcess(object):
         self._result = multiprocessing.Queue()
 
     def _proxy_invoke(self, *args, **kwargs):
-        res = self._target(*args, **kwargs)
-        self._result.put(res)
+        try:
+            res = self._target(*args, **kwargs)
+            self._result.put(res)
+        except Exception as e:
+            self._result.put(e)
 
     def start_wait_result(self):
         self._proc.start()
         try:
             logging.debug("wait process: {}, pid: {}".format(self._proc.name, self._proc.pid))
-            return self._result.get(timeout=self._interval)
+            res = self._result.get(timeout=self._interval)
+            if isinstance(res, Exception):
+                raise ValueError(res.args)
+            return res
+        except ValueError as e:
+            return e
         except Exception:
-            raise TimeoutError
+            raise TimeoutError()
         finally:
             if self._proc.is_alive():
                 self._proc.kill()

@@ -403,11 +403,7 @@ class InvokeService(object):
         return self._method_name
 
     def invoke(self, *args, **kwargs):
-        try:
-            return self._func(self._instance, *args, **kwargs)
-        except Exception as e:
-            logging.debug("Service Invoke error", exc_info=e)
-            return None
+        return self._func(self._instance, *args, **kwargs)
 
     def __repr__(self):
         return "<{}#{}>".format(self.cls_name, self.method_name)
@@ -473,8 +469,8 @@ class RemoteInvokeServer(TcpServer):
             else:
                 resp = make_response(data=result)
             conner.send_from(resp)
-        except TimeoutError:
-            logging.debug("Invoke timeout")
+        except TimeoutError as e:
+            logging.debug("Invoke timeout", exc_info=e)
             return make_response(data=req, message="调用超时", code=5002)
         except Exception as e:
             logging.debug("Invoke error: {}".format(e), exc_info=e)

@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 @scheduler.run_thread()
 def run():
-    server = scheduler.RemoteInvokeServer('0.0.0.0', 8888)
+    server = scheduler.RemoteInvokeServer('0.0.0.0', 9999)
     server.add_service(Task())
     server.start()
 
@@ -19,7 +19,7 @@ class Adapter(scheduler.ConnectorAdapter):
         return True
 
     def get(self):
-        sock = scheduler.socket.create_connection(('0.0.0.0', 8888))
+        sock = scheduler.socket.create_connection(('0.0.0.0', 9999))
         return scheduler.RemoteInvokeConnector(sock)
 
   
@@ -36,20 +36,20 @@ class Task(scheduler.Task):
     def __init__(self):
         self._queue = scheduler.Queue()
         self._queue.put("htt")
-        # self._queue.put("wwww")
-        # self._queue.put("wwww")
-        # self._queue.put("wwww")
+        self._queue.put("wwww")
+        self._queue.put("wwww")
+        self._queue.put("wwww")
 
     def has_task(self):
         return self._queue.qsize() > 0
 
-    def test(self):
-        time.sleep(10)
+    def test(self, ii):
+        spider.sleep_range(60 * 3 + 10)
         return 10
 
     def next_task(self):
         self._queue.get()
-        return scheduler.make_request("Task", "test", timeout=12)
+        return scheduler.make_request("Task", "test", timeout=None)
 
 
 run()
