@@ -5,7 +5,7 @@ import selenium
 
 
 
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.INFO)
 
 
 accounts = spider.load_json('./account.json')
@@ -65,6 +65,6 @@ elastic = {
 }
 
 
-server = scheduler.RemoteInvokeServer('0.0.0.0', 8080, None)
+server = scheduler.RemoteInvokeServer('0.0.0.0', 8080, invoke_timeout=10 * 60)
 server.add_service(LinkedinService(**elastic))
 server.start()

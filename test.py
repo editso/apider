@@ -52,14 +52,14 @@ class Task(scheduler.Task):
         return scheduler.make_request("Task", "test", timeout=None)
 
 
-run()
+# run()
 
-dispatcher = scheduler.remote_invoke_dispatcher(Adapter())
-dispatcher.add_listener(Listener())
-s = scheduler.Scheduler()
-s.add_dispatcher(dispatcher)
-s.register(Task())
-s.dispatch()
+# dispatcher = scheduler.remote_invoke_dispatcher(Adapter())
+# dispatcher.add_listener(Listener())
+# s = scheduler.Scheduler()
+# s.add_dispatcher(dispatcher)
+# s.register(Task())
+# s.dispatch()
 
 elastic = {
     "hosts": ["172.16.2.193"],
@@ -69,7 +69,19 @@ elastic = {
     "password": "USA76oBn6ZcowOpofKpS"
 }
 
-# es = spider.ElasticStorage(**elastic)
+es = spider.ElasticStorage(**elastic)
+
+data = es.term_query('linkedin_account', query={
+    'stat': False
+})
+
+hits = data['hits']['hits']
+
+for item in hits:
+    es.update('linkedin_account', item['_id'], {
+        'stat': True
+    })
+
 # sc = spider.ElasticCache("linkedin_cache", elastic=elastic)
 # print(es.exists('linkedin', 'ohuBGnUBJQDNASgvoUZD'))
 # print(sc.pop())

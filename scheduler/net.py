@@ -116,3 +116,8 @@ def connect(host, port, timeout=30) -> Connector:
     sock = socket.create_connection((host, port), timeout=timeout)
     return DefaultConnector(sock)
 
+def win_conect(host, port) -> Connector:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind((host, port))
+    return sock.connect(None)
+ 

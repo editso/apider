@@ -52,6 +52,7 @@ class LinkedinTask(scheduler.Task):
         return scheduler.make_request(
             cls_name='LinkedinService',
             method_name='crawl',
+            timeout=10 * 60,
             url=self._url
         )
 

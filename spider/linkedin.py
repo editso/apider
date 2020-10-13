@@ -229,12 +229,15 @@ class LinkedinUserInfo(object):
         if items.__len__() <= 0:
             return
         for item in items:
-            self.scroll_to_element(item)
-            if re.match(r'显示*', item.text):
-                click_show = True
-                self.click_element(item, 5)
-            elif re.match(r'收起*', item.text) or not click_show:
-                return
+            try:
+                self.scroll_to_element(item)
+                if re.match(r'显示*', item.text):
+                    click_show = True
+                    self.click_element(item, 5)
+                elif re.match(r'收起*', item.text) or not click_show:
+                    return
+            except Exception:
+                break
         self._show_all_jobs(click_show)
 
     def get_jobs(self):

@@ -7,6 +7,7 @@ from .net import connect, Connector, TcpServer
 import socket
 import json
 import multiprocessing
+import smtplib
 
 
 class Task(object):
@@ -69,6 +70,42 @@ class Response(object):
 
     def __str__(self):
         return self.__repr__()
+
+
+class Reporter(object):
+    """汇报器"""
+
+    def set_date(self, date):
+        pass
+
+    def set_title(self, title):
+        pass
+
+    def set_body(self, body):
+        pass
+
+    def report(self):
+        """汇报信息"""
+
+
+class SMTPReporter(Reporter):
+
+    def __init__(self, sender, receives: []):
+        super().__init__()
+        self._sender = sender
+        self._receives = receives
+
+    def set_body(self, body):
+        pass
+
+    def set_title(self, title):
+        return super().set_title(title)
+
+    def set_date(self, date):
+        return super().set_date(date)
+
+    def report(self):
+        return super().report()
 
 
 class DispatchListener(object):
