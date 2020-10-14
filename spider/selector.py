@@ -6,6 +6,7 @@ from .utils import catcher, dynamic_attr
 import time
 
 
+
 class Selector(object):
 
     def __init__(self, driver: WebDriver):

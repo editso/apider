@@ -13,7 +13,7 @@ class RemoteServerAdapter(scheduler.ConnectorAdapter):
         self._connect = True
 
     def has_connector(self):
-        sock = scheduler.socket.create_connection(('0.0.0.0', 8080))
+        sock = scheduler.socket.create_connection(('127.0.0.1', 8080))
         self._cur_sock = sock
         return self._cur_sock is not None and self._connect
 
@@ -71,9 +71,10 @@ cache.push({
     'url': 'https://www.linkedin.com/in/theahmadimam/'
 })
 
-dispatcher = scheduler.remote_invoke_dispatcher(RemoteServerAdapter([]))
-dispatcher.add_listener(DispatcherListener())
-ts = scheduler.Scheduler()
-ts.register(LinkedinTask(cache))
-ts.add_dispatcher(dispatcher)
-ts.dispatch()
+if __name__ == '__main__':
+    dispatcher = scheduler.remote_invoke_dispatcher(RemoteServerAdapter([]))
+    dispatcher.add_listener(DispatcherListener())
+    ts = scheduler.Scheduler()
+    ts.register(LinkedinTask(cache))
+    ts.add_dispatcher(dispatcher)
+    ts.dispatch()

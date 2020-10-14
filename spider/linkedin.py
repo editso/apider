@@ -596,4 +596,4 @@ class Linkedin(Spider):
 
 
 def linkedin_cache(*args, **kwargs):
-    return ElasticCache('linkedin_cache', elastic=kwargs, *args)
+    return ElasticCache('linkedin_cache', max_size=1, elastic=kwargs, *args)

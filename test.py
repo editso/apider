@@ -2,7 +2,7 @@ import scheduler
 import logging
 import time
 import spider
-
+import sys
 logging.basicConfig(level=logging.DEBUG)
 
 
@@ -82,8 +82,9 @@ for item in hits:
         'stat': True
     })
 
-# sc = spider.ElasticCache("linkedin_cache", elastic=elastic)
-# print(es.exists('linkedin', 'ohuBGnUBJQDNASgvoUZD'))
-# print(sc.pop())
-# sc.reset_stat('linkedin_cache', ['queue', 'success'], 'wait')
+sc = spider.ElasticCache("linkedin_cache", elastic=elastic)
+print(es.exists('linkedin', 'ohuBGnUBJQDNASgvoUZD'))
+print(sc.pop())
+sc.reset_stat('linkedin_cache', ['queue'], 'wait')
+
 

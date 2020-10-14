@@ -19,7 +19,9 @@ def run_process(name=None, deamon=False):
             proc.start()
             logging.debug("Process Started, pid: {}".format(proc.pid))
             return proc
+
         return set_args
+
     return wrapper
 
 
@@ -55,43 +57,82 @@ def run_timer(interval=10, never=False):
                 pt.start()
                 pt.join()
                 _run = False
+
         return set_args
+
     return wrapper
 
 
 class TimerProcess(object):
 
-    def __init__(self, target, interval=None,  args=(), kwargs={}):
+    def __init__(self, target, interval=None, args=(), kwargs=None):
         self._interval = interval
         self._target = target
         self.args = args
         self.kwargs = kwargs
+        multiprocessing.freeze_support()
         self._proc = multiprocessing.Process(
             target=self._proxy_invoke, args=args, kwargs=kwargs)
         self._result = multiprocessing.Queue()
 
     def _proxy_invoke(self, *args, **kwargs):
         try:
+            logging.debug("wait process: {}, pid: {}".format(self._proc.name, self._proc.pid))
             res = self._target(*args, **kwargs)
             self._result.put(res)
         except Exception as e:
             self._result.put(e)
 
     def start_wait_result(self):
-        self._proc.start()
         try:
-            logging.debug("wait process: {}, pid: {}".format(self._proc.name, self._proc.pid))
+            self._proc.start()
             res = self._result.get(timeout=self._interval)
             if isinstance(res, Exception):
                 raise ValueError(res.args)
             return res
         except ValueError as e:
-            return e
+            raise e
         except Exception:
             raise TimeoutError()
         finally:
             if self._proc.is_alive():
                 self._proc.kill()
 
-def make_timer_process(target, interval, args=(), kwargs={}):
-    return TimerProcess(target, interval=interval, args=args, kwargs=kwargs).start_wait_result()
+
+class PipeProcess(object):
+
+    def __init__(self):
+        self._pipe = multiprocessing.Pipe()
+        self._proc = multiprocessing.Process(target=self._proc_target)
+
+    def _proc_target(self, *args, **kwargs):
+        pip = self._pipe[1]
+        func = pip.recv()
+        args = pip.recv()
+        kwargs = pip.recv()
+        func(*args,  **kwargs)
+
+    def wait_for_value(self, func, args, kwargs):
+        self._proc.start()
+        pip = self._pipe[0]
+        pip.send(func)
+        pip.send(args)
+        pip.send(kwargs)
+        return self._pipe[0].recv()
+
+
+def fun_proxy(func, *args, **kwargs):
+    def proxy(*args, **kwargs):
+        return func(*args, **kwargs)
+    return proxy
+
+
+def object_proxy(o):
+    def proxy():
+        return o
+
+    return proxy
+
+
+def make_timer_process(func, interval, args=(), kwargs=None):
+    return TimerProcess(func, interval=interval, args=args, kwargs=dict(kwargs or {})).start_wait_result()

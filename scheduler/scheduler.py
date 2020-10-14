@@ -1,13 +1,18 @@
 from queue import Queue
 import time
-from .utils import check_type, run_process, run_thread, run_timer, make_timer_process
+from .utils import check_type, run_process, run_thread, run_timer, make_timer_process, object_proxy, PipeProcess
 import threading
 import logging
 from .net import connect, Connector, TcpServer
-import socket
+
 import json
-import multiprocessing
-import smtplib
+
+
+def test(*args, **kwargs):
+    return 10
+
+
+objects = []
 
 
 class Task(object):
@@ -31,7 +36,7 @@ class ErrorTask(Task):
         return self._queue.qsize()
 
     def get_task(self):
-        return self._queuq.get()
+        return self._queue.get()
 
 
 class Request(object):
@@ -136,10 +141,6 @@ class TaskQueue(object):
         self._queue = Queue()
         self._cur_task: Task = None
 
-    @property
-    def err() -> ErrorTask:
-        return self._err_task
-
     def pop(self) -> Task:
         task_item = None
         while task_item is None:
@@ -182,13 +183,12 @@ class Scheduler(object):
         for dispatcher in self._dispatcher:
             if dispatcher.can_handle(task):
                 return dispatcher
-        return None
 
     def _task_error(self, error):
         self._failure_task.append(error)
 
     def _dispatch(self, dispatcher: Dispatcher, task_item):
-        logging.debug("dispatche: {}".format(task_item))
+        logging.debug("dispatch: {}".format(task_item))
         try:
             dispatcher.dispatch(task_item)
         except Exception as e:
@@ -256,7 +256,7 @@ class JsonDeCoder(DeCoder):
             for item in data:
                 setattr(instance, item, data[item])
             return instance
-        except Exception as e:
+        except Exception:
             return None
 
 
@@ -315,14 +315,14 @@ class RemoteInvokeConnector(Connector):
             return False
         return True
 
-    def recv_from(self, r: (Request or Response)):
+    def recv_from(self, r: (Request or Response))->(Request or Response):
         data = self.read()
         return self.decode(data, r)
 
     def decode(self, data, r: (Request or Response)):
         return self._decoder.decoder(data, r)
 
-    def encode(self, r: (Request or Response)):
+    def encode(self, r: (Request or Response))->(Request or Response):
         return self._encoder.encoder(r)
 
 
@@ -348,12 +348,12 @@ class RemoteInvokeDispatcher(Dispatcher):
             connector.send_from(_request)
             res = connector.recv_from(Response)
             if res is None or int(res.code) in [4004, 5000, 5001, 5002]:
-                self._notify_all_litener("error", _request)
+                self._notify_all_listener("error", _request)
             elif int(res.code) == 200:
-                self._notify_all_litener("success", res, _request)
+                self._notify_all_listener("success", res, _request)
         except Exception as e:
             logging.debug("Invoke Error", exc_info=e)
-            self._notify_all_litener("error", _request)
+            self._notify_all_listener("error", _request)
         finally:
             try:
                 connector.close()
@@ -401,7 +401,6 @@ class RemoteInvokeDispatcher(Dispatcher):
                 logging.debug("Connector Error:{}".format(e), exc_info=e)
             with self._mutex:
                 self._mutex.wait(10)  # 等待10秒,防止僵尸
-        return True
 
     def add_listener(self, listener):
         check_type(listener, DispatchListener)
@@ -411,7 +410,7 @@ class RemoteInvokeDispatcher(Dispatcher):
         with self._mutex:
             self._mutex.notify()
 
-    def _notify_all_litener(self, name, *args, **kwargs):
+    def _notify_all_listener(self, name, *args, **kwargs):
         for item in self._listener:
             if name == 'error':
                 item.error(*args, **kwargs)
@@ -425,11 +424,11 @@ class RemoteInvokeDispatcher(Dispatcher):
 
 class InvokeService(object):
 
-    def __init__(self, cls_name, method_name, func=None, instance=None):
+    def __init__(self, cls, cls_name, method_name, func=None):
         self._cls_name = cls_name
         self._method_name = method_name
-        self._instance = instance
         self._func = func
+        self._cls = cls
 
     @property
     def cls_name(self):
@@ -440,7 +439,8 @@ class InvokeService(object):
         return self._method_name
 
     def invoke(self, *args, **kwargs):
-        return self._func(self._instance, *args, **kwargs)
+        instance: RemoteService = self._cls().__call__()
+        return getattr(instance, self.method_name)(*args, **kwargs)
 
     def __repr__(self):
         return "<{}#{}>".format(self.cls_name, self.method_name)
@@ -466,6 +466,7 @@ class RemoteInvokeServer(TcpServer):
         """
         super().__init__(host, port)
         self._service = []
+        # self._service = objects
         self._invoke_timeout = invoke_timeout
 
     def lock_up(self, cls_name, method_name):
@@ -474,23 +475,25 @@ class RemoteInvokeServer(TcpServer):
                 return item
         return None
 
-    def add_service(self, instance):
-        check_type(instance, object)
-        name = instance.__class__.__name__
-        for k, v in instance.__class__.__dict__.items():
+    def add_service(self, cls):
+        if not callable(cls) or not issubclass(cls, RemoteService):
+            raise TypeError()
+        name = cls.__name__
+        for k, v in cls.__dict__.items():
             if not callable(v) or k.startswith('_'):
                 continue
-            service = InvokeService(name, k, v, instance)
+            service = InvokeService(cls, name, k, v)
             if service not in self._service:
                 self._service.append(service)
 
     @run_thread()
     def handler_remote_invoke(self, conner: RemoteInvokeConnector):
         req: Request = None
+        resp = None
         try:
             resp = None
             req = conner.recv_from(Request)
-            service = None
+            service:InvokeService = None
             result = None
             if not req:
                 resp = make_response(message="请求有误", code=5000)
@@ -498,21 +501,24 @@ class RemoteInvokeServer(TcpServer):
                 service = self.lock_up(req.cls_name, req.method_name)
             if service:
                 result = make_timer_process(
-                    service.invoke, interval=req.timeout or self._invoke_timeout, args=req.args, kwargs=req.kwargs)
+                    service.invoke,
+                    interval=req.timeout or self._invoke_timeout,
+                    args=req.args,
+                    kwargs=req.kwargs)
             elif not resp:
                 resp = make_response(data=req, message="找不到服务", code=4004)
             if isinstance(result, Response):
                 resp = result
             else:
                 resp = make_response(data=result)
-            conner.send_from(resp)
         except TimeoutError as e:
             logging.debug("Invoke timeout", exc_info=e)
-            return make_response(data=req, message="调用超时", code=5002)
+            resp = make_response(data=req.__dict__, message="调用超时", code=5002)
         except Exception as e:
             logging.debug("Invoke error: {}".format(e), exc_info=e)
-            return make_response(data=None, message="未知错误", code=5001)
+            resp = make_response(data=None, message="未知错误", code=5001)
         finally:
+            conner.send_from(resp)
             conner.close()
 
     def start(self):
@@ -521,6 +527,12 @@ class RemoteInvokeServer(TcpServer):
             sock, addr = self.socket.accept()
             remote_conner = RemoteInvokeConnector(sock)
             self.handler_remote_invoke(remote_conner)
+
+
+class RemoteService(object):
+
+    def __call__(self, *args, **kwargs):
+        return self
 
 
 def remote_invoke_dispatcher(adapter: ConnectorAdapter):
