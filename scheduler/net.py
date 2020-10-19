@@ -6,10 +6,37 @@ from .utils import run_thread
 logger = logging.getLogger(__name__)
 
 
+class Verify(object):
+
+    def verify(self, connect):
+        pass
+
+
 class Connector(object):
 
     def __init__(self, sock):
-        self._sock = sock
+        self._sock: socket.socket = sock
+        self._verify = None
+        self._host = self._sock.getsockname()
+        self._port = self._sock.getpeername()
+
+    def set_verify(self, verify):
+        if not isinstance(verify, Verify):
+            raise TypeError("Need a Verify")
+        self._verify = verify
+
+    def available(self):
+        if self._verify:
+            return self._verify.verify(self)
+        return True
+
+    @property
+    def host(self):
+        return self._host
+
+    @property
+    def port(self):
+        return self._port
 
     @property
     def socket(self):
@@ -116,8 +143,4 @@ def connect(host, port, timeout=30) -> Connector:
     sock = socket.create_connection((host, port), timeout=timeout)
     return DefaultConnector(sock)
 
-def win_conect(host, port) -> Connector:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind((host, port))
-    return sock.connect(None)
- 
+

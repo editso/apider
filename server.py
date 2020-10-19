@@ -25,8 +25,8 @@ class LinkedinAdapter(spider.LinkedinAdapter):
 
     def __init__(self, *args, **kwargs):
         self.account = spider.LinkedAccount(*args, **kwargs)
-        for account in accounts:
-            self.account.add(account['account'], account['password'])
+        # for account in accounts:
+        #     self.account.add(account['account'], account['password'])
         self.cache = spider.linkedin_cache(**kwargs)
         self.storage = spider.ElasticStorage(**kwargs)
 
@@ -60,16 +60,7 @@ class LinkedinService(scheduler.RemoteService):
     def crawl(self, url):
         with spider.Linkedin(url, self._adapter)  as linked:
             log = linked.start()
-            logging.info("crawl finish: {}".format(log))
-            if log.code == spider.code['success']:
-                self._cache.success({
-                    url: spider.remove_url_end(url)
-                })
-            else:
-                self._cache.error({
-                    'url': spider.remove_url_end(url)
-                })
-            return scheduler.make_response(log.target, code=log.code)
+            return scheduler.make_response(log.u_target, code=log.code)
 
 
 class LinkedinAdapter(spider.LinkedinAdapter):
@@ -99,7 +90,6 @@ class LinkedinAdapter(spider.LinkedinAdapter):
 
 
 if __name__ == '__main__':
-
-    server = scheduler.RemoteInvokeServer('127.0.0.1', 8080, invoke_timeout=10 * 60)
-    server.add_service(LinkedinService)
+    server = scheduler.RemoteInvokeServer('127.0.0.1', 8888, invoke_timeout=10 * 60)
+    # server.add_service(LinkedinService)
     server.start()

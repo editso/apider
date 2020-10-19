@@ -4,6 +4,7 @@ import time
 import spider
 import sys
 logging.basicConfig(level=logging.DEBUG)
+from storage import *
 
 
 @scheduler.run_thread()
@@ -52,6 +53,25 @@ class Task(scheduler.Task):
         return scheduler.make_request("Task", "test", timeout=None)
 
 
+def oper():
+    es = spider.ElasticStorage(**elastic)
+
+    data = es.term_query('linkedin_account', query={
+        'stat': False
+    })
+
+    hits = data['hits']['hits']
+
+    for item in hits:
+        es.update('linkedin_account', item['_id'], {
+            'stat': True
+        })
+
+    sc = spider.ElasticCache("linkedin_cache", elastic=elastic)
+    print(es.exists('linkedin', 'ohuBGnUBJQDNASgvoUZD'))
+    print(sc.pop())
+    sc.reset_stat('linkedin_cache', ['queue'], 'wait')
+
 # run()
 
 # dispatcher = scheduler.remote_invoke_dispatcher(Adapter())
@@ -69,22 +89,30 @@ elastic = {
     "password": "USA76oBn6ZcowOpofKpS"
 }
 
-es = spider.ElasticStorage(**elastic)
 
-data = es.term_query('linkedin_account', query={
-    'stat': False
-})
+# pid = scheduler.multiprocessing.current_process().pid
+# print(pid)
+# poller = scheduler.Poller(callback)
+# poller.poll()
+# poller.put("aaa")
 
-hits = data['hits']['hits']
+# esc = [
+#     "https://elastic:USA76oBn6ZcowOpofKpS@172.16.2.193:9200"
+# ]
+#
+# esc = scheduler.ElasticRemoteServer(esc)
+# esc.push('127.0.0.1', 8888)
+# e = esc.pull()
+# print(e)
 
-for item in hits:
-    es.update('linkedin_account', item['_id'], {
-        'stat': True
-    })
 
-sc = spider.ElasticCache("linkedin_cache", elastic=elastic)
-print(es.exists('linkedin', 'ohuBGnUBJQDNASgvoUZD'))
-print(sc.pop())
-sc.reset_stat('linkedin_cache', ['queue'], 'wait')
+engine = make_mysql('root', '79982473', 'test')
+storage = UrlStorage(engine)
+storage.push('user_info', 'http://editso.com', 2)
+storage.push('user_info', 'http://editso.com://', 1)
+storage.set('user_info', [1, 2], 1)
+
+print(storage.get('user_info', 10, 1))
+
 
 

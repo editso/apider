@@ -1,18 +1,15 @@
 from queue import Queue
 import time
-from .utils import check_type, run_process, run_thread, run_timer, make_timer_process, object_proxy, PipeProcess
+from .utils import check_type, run_process, run_thread, \
+    run_timer, make_timer_process, \
+    object_proxy, PipeProcess, md5_hex_digest
 import threading
 import logging
-from .net import connect, Connector, TcpServer
-
+from .net import connect, Connector, TcpServer, Verify
+import multiprocessing
+import elasticsearch
+import socket
 import json
-
-
-def test(*args, **kwargs):
-    return 10
-
-
-objects = []
 
 
 class Task(object):
@@ -285,6 +282,7 @@ class RemoteInvokeConnector(Connector):
         data = b''
         while True:
             recv_data = self.socket.recv(buff_size)
+            print(recv_data)
             if not recv_data:
                 return data
             data += recv_data
@@ -292,6 +290,7 @@ class RemoteInvokeConnector(Connector):
                 return data[0:-2]
 
     def write(self, data):
+        print("write:{}".format(data))
         try:
             self.socket.sendall(data)
             self.flush()
@@ -315,15 +314,24 @@ class RemoteInvokeConnector(Connector):
             return False
         return True
 
-    def recv_from(self, r: (Request or Response))->(Request or Response):
+    def recv_from(self, r: (Request or Response)) -> (Request or Response):
         data = self.read()
         return self.decode(data, r)
 
     def decode(self, data, r: (Request or Response)):
         return self._decoder.decoder(data, r)
 
-    def encode(self, r: (Request or Response))->(Request or Response):
+    def encode(self, r: (Request or Response)) -> (Request or Response):
         return self._encoder.encoder(r)
+
+
+class RemoteInvokeListener(object):
+
+    def on_connect(self, connector: Connector):
+        pass
+
+    def on_close(self, connector: Connector):
+        pass
 
 
 class RemoteInvokeDispatcher(Dispatcher):
@@ -336,7 +344,7 @@ class RemoteInvokeDispatcher(Dispatcher):
         self._lock = threading.Lock()
         self._mutex = threading.Condition(self._lock)
         self._remote_task = []
-        self._adapter = adapter
+        self._adapter: ConnectorAdapter = adapter
         self._loop_dispatch_task()
         self._listener = []
 
@@ -359,12 +367,18 @@ class RemoteInvokeDispatcher(Dispatcher):
                 connector.close()
             except Exception:
                 pass
-            self._adapter.finish(_connector, _request)
+            try:
+                self._adapter.finish(_connector, _request)
+            except Exception:
+                pass
 
     def _select_connector(self) -> RemoteInvokeConnector:
         remote_invoke = None
         while not remote_invoke:
             try:
+                while not self._adapter.has_connector():
+                    with self._mutex:
+                        self._mutex.wait(5)
                 remote_invoke = self._adapter.get()
                 if not remote_invoke or not isinstance(remote_invoke, RemoteInvokeConnector):
                     continue
@@ -454,11 +468,20 @@ class InvokeService(object):
         return obj.method_name == self.method_name and obj.cls_name == self.cls_name
 
 
-class RemoteInvokeServer(TcpServer):
+class RemoteInvokeListener(object):
+
+    def on_connect(self, connector: Connector):
+        pass
+
+    def on_close(self, connector: Connector):
+        pass
+
+
+class RemoteInvokeServer(TcpServer, Verify):
     """远程调用服务端
     """
 
-    def __init__(self, host, port, invoke_timeout=None, *args, **kwargs):
+    def __init__(self, host, port, max_connection=1, invoke_timeout=None, *args, **kwargs):
         """
             invoke_timeout: 默认服务调用超时时间,
                             为空表示直到服务运行到结束
@@ -466,8 +489,9 @@ class RemoteInvokeServer(TcpServer):
         """
         super().__init__(host, port)
         self._service = []
-        # self._service = objects
         self._invoke_timeout = invoke_timeout
+        self._max_connection = max_connection
+        self._connector = []
 
     def lock_up(self, cls_name, method_name):
         for item in self._service:
@@ -486,6 +510,27 @@ class RemoteInvokeServer(TcpServer):
             if service not in self._service:
                 self._service.append(service)
 
+    def add_listener(self, listener):
+        pass
+
+    def verify(self, connector: Connector):
+        try:
+            print(connector)
+            data = connector.read()
+            print(data)
+            data = json.loads(data.decode('utf-8'))
+            if data['type'] != 'verify':
+                connector.write({'code': 400})
+            else:
+                if not len(self._connector) >= self._max_connection:
+                    connector.write({'code': 400})
+                else:
+                    connector.write({'code': 200})
+                    return True
+        except Exception:
+            pass
+        return False
+
     @run_thread()
     def handler_remote_invoke(self, conner: RemoteInvokeConnector):
         req: Request = None
@@ -493,7 +538,7 @@ class RemoteInvokeServer(TcpServer):
         try:
             resp = None
             req = conner.recv_from(Request)
-            service:InvokeService = None
+            service: InvokeService = None
             result = None
             if not req:
                 resp = make_response(message="请求有误", code=5000)
@@ -518,6 +563,10 @@ class RemoteInvokeServer(TcpServer):
             logging.debug("Invoke error: {}".format(e), exc_info=e)
             resp = make_response(data=None, message="未知错误", code=5001)
         finally:
+            try:
+                self._connector.remove(conner)
+            except Exception:
+                pass
             conner.send_from(resp)
             conner.close()
 
@@ -526,6 +575,14 @@ class RemoteInvokeServer(TcpServer):
         while True:
             sock, addr = self.socket.accept()
             remote_conner = RemoteInvokeConnector(sock)
+            remote_conner.set_verify(self)
+            if not remote_conner.available():
+                try:
+                    remote_conner.close()
+                except Exception:
+                    pass
+                continue
+            self._connector.append(remote_conner)
             self.handler_remote_invoke(remote_conner)
 
 
@@ -533,6 +590,183 @@ class RemoteService(object):
 
     def __call__(self, *args, **kwargs):
         return self
+
+
+class Poller(object):
+
+    def __init__(self, target):
+        self._queue = multiprocessing.Queue()
+        self._target = target
+        self._stop = False
+
+    def _notify(self, data):
+        self._target(data)
+
+    def stop(self):
+        self._stop = True
+
+    def put(self, data):
+        self._queue.put(data)
+
+    @run_process()
+    def poll(self):
+        while True and not self._stop:
+            try:
+                data = self._queue.get(10)
+                self._notify(data)
+            except Exception:
+                pass
+
+
+class RemoteServer(object):
+    """
+    远程服务器
+    """
+
+    def pull(self, name=None, mark=None):
+        pass
+
+    def push(self, host, port, mark=None, verify=None):
+        pass
+
+    def remove(self, name):
+        pass
+
+
+class ElasticRemoteServer(RemoteServer):
+
+    __mappings__ = {
+        "mappings": {
+            "properties": {
+                "host": {
+                    "type": "text",
+                    "index": False
+                },
+                "port": {
+                    "type": "integer",
+                    "index": False
+                },
+                "mark": {
+                    "type": "text"
+                },
+                "verify": {
+                    "type": "object",
+                }
+            }
+        }
+    }
+
+    def __init__(self, es, index_name=None, verify_certs=False, **kwargs):
+        self._es = elasticsearch.Elasticsearch(
+            es, verify_certs=verify_certs, **kwargs)
+        self._index_name = index_name or 'remote_servers'
+        self.init()
+
+    def init(self):
+        if not self._es.indices.exists(self._index_name):
+            self._es.indices.create(self._index_name, body=self.__mappings__)
+
+    def pull(self, name=None, mark=None):
+        query = None
+        if isinstance(mark, str):
+            mark = [mark]
+        if mark:
+            query = {
+                'query': {
+                    "terms": {
+                        'mark': mark
+                    }
+                }
+            }
+        data = self._es.search(index=self._index_name, body=query)[
+            'hits']['hits']
+        if data:
+            return data[0]['_source']
+        return None
+
+    def push(self, host, port, mark=None, verify=None):
+        e_id = md5_hex_digest("{}:{}".format(host, port))
+        body = {
+            'host': host,
+            "port": port,
+            'mark': mark or 'none',
+            'verify': verify or {}
+        }
+        print(body)
+        if not self._es.exists(self._index_name, e_id):
+            self._es.index(self._index_name, body=body,
+                           id=e_id, refresh='wait_for')
+        else:
+            self._es.update(self._index_name, e_id, {
+                'doc': body
+            }, refresh='wait_for')
+
+    def remove(self, name):
+        return super().remove(name)
+
+
+class RemoteServerAdapter(ConnectorAdapter, Verify):
+
+    def __init__(self, remote_server, timeout=10):
+        self._lock = threading.Lock()
+        self._mutex = threading.Condition(self._lock)
+        self._remote: RemoteServer = remote_server
+        self._timeout = timeout
+        self._queue = Queue()
+
+    def verify(self, connector: RemoteInvokeConnector):
+        try:
+            print("verisy")
+            connector.send_from()
+            if not connector.write(bytes("aaaaaaaaaaaaaaaaaaaaaaaa")):
+                return False
+            data = connector.read()
+            print(data)
+            data = json.loads(data.encode('utf-8'))
+            print(data)
+            if data['code'] == 200:
+                return True
+            return False
+        except Exception as e:
+            print(e)
+            pass
+        return False
+
+    def has_connector(self):
+        while True:
+            try:
+                server = self._remote.pull(mark=['none', 'wait'])
+                if server is not None:
+                    host = server['host']
+                    port = server['port']
+                    sock = socket.create_connection((host, port))
+                    connector = RemoteInvokeConnector(sock)
+                    connector.set_verify(self)
+                    self.verify(connector)
+                    # if connector.available():
+                    #     self._queue.put(connector)
+                    #     break
+                    # connector.close()
+            except Exception as e:
+                logging.error("connect error", exc_info=e)
+            try:
+                with self._mutex:
+                    self._mutex.wait(self._timeout)
+            except Exception:
+                pass
+        return not self._queue.empty()
+
+    def get(self):
+        with self._mutex:
+            return self._queue.get()
+
+    def finish(self, connector: Connector, task_item):
+        with self._mutex:
+            self._remote.push(connector.host, connector.port)
+
+
+def remote_connector_adapter(remote_server, timeout=10):
+    return RemoteServerAdapter(remote_server, timeout=timeout)
 
 
 def remote_invoke_dispatcher(adapter: ConnectorAdapter):

@@ -2,48 +2,34 @@ import spider
 import scheduler
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
 
-
-class RemoteServerAdapter(scheduler.ConnectorAdapter):
-
-    def __init__(self, servers:list):
-        self._servers = servers
-        self._cur_sock = None
-        self._connect = True
-
-    def has_connector(self):
-        sock = scheduler.socket.create_connection(('127.0.0.1', 8080))
-        self._cur_sock = sock
-        return self._cur_sock is not None and self._connect
-
-    def get(self):
-        self._connect = False
-        return scheduler.RemoteInvokeConnector(self._cur_sock)
-
-    def finish(self, server, task):
-        self._connect = True
+logging.basicConfig(level=logging.INFO)
 
 
 class DispatcherListener(scheduler.DispatchListener):
 
     def error(self, request, *args, **kwargs):
-        pass
-       
+        print(request)
+
     def success(self, *args, **kwargs):
         pass
+
 
 class LinkedinTask(scheduler.Task):
 
     def __init__(self, cache, *args, **kwargs):
         self._cache = cache
         self._url = None
-        self.count =  2
+        self.count = 0
 
     def has_task(self):
         try:
-            data = self._cache.pop()
-            self._url = data['url']
+            # data = self._cache.pop()
+            # self._url = data['url']
+            self._url = '11111'
+            if self.count == 2:
+                return False
+            self.count += 1
             return self._url is not None
         except Exception:
             return False
@@ -67,12 +53,10 @@ elastic = {
 
 cache = spider.linkedin_cache(**elastic)
 
-cache.push({
-    'url': 'https://www.linkedin.com/in/theahmadimam/'
-})
-
 if __name__ == '__main__':
-    dispatcher = scheduler.remote_invoke_dispatcher(RemoteServerAdapter([]))
+    remote_server = scheduler.ElasticRemoteServer(["https://elastic:USA76oBn6ZcowOpofKpS@172.16.2.193:9200"])
+    adapter = scheduler.remote_connector_adapter(remote_server)
+    dispatcher = scheduler.remote_invoke_dispatcher(adapter)
     dispatcher.add_listener(DispatcherListener())
     ts = scheduler.Scheduler()
     ts.register(LinkedinTask(cache))

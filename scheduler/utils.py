@@ -1,7 +1,7 @@
 import multiprocessing
 import threading
 import logging
-
+import hashlib
 
 def check_type(o, o_type, err=None):
     if not isinstance(o, o_type):
@@ -87,6 +87,7 @@ class TimerProcess(object):
         try:
             self._proc.start()
             res = self._result.get(timeout=self._interval)
+            self._proc.join()
             if isinstance(res, Exception):
                 raise ValueError(res.args)
             return res
@@ -136,3 +137,6 @@ def object_proxy(o):
 
 def make_timer_process(func, interval, args=(), kwargs=None):
     return TimerProcess(func, interval=interval, args=args, kwargs=dict(kwargs or {})).start_wait_result()
+
+def md5_hex_digest(s: str, encode='utf8'):
+    return hashlib.md5(s.encode(encode)).hexdigest()
