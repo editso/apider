@@ -1,5 +1,6 @@
 from sqlalchemy import Column
 from sqlalchemy import *
+import pymysql
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import or_

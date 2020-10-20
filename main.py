@@ -44,11 +44,9 @@ class ConnectAdapter(scheduler.ConnectorAdapter, scheduler.Verify):
         self.__servers__.clear()
 
     def has_connector(self):
-        print("....")
         return not self._queue.empty()
 
     def get(self):
-        print("get")
         return self._queue.get()
 
 
@@ -76,7 +74,6 @@ class LinkedinTask(scheduler.Task):
             if self.count == 9:
                 return False
             self.count += 1
-            print("task")
             return self._url is not None
         except Exception:
             return False
