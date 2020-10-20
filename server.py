@@ -2,9 +2,12 @@ import scheduler
 import spider
 import logging
 import selenium
+import storage
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
+db_engine = storage.make_mysql('root', '79982473', 'test')
+server_cache = storage.HostStorage(db_engine)
 
 accounts = {}
 try:
@@ -58,9 +61,35 @@ class LinkedinService(scheduler.RemoteService):
         self._cache = cache
 
     def crawl(self, url):
-        with spider.Linkedin(url, self._adapter)  as linked:
-            log = linked.start()
-            return scheduler.make_response(log.u_target, code=log.code)
+        print("crawl")
+        spider.time.sleep(5)
+        # with spider.Linkedin(url, self._adapter)  as linked:
+        #     # log = linked.start()
+        #     log = spider.make_crawl_log('')
+        #     return scheduler.make_response(log.u_target, code=log.code)
+
+
+class InvokeListener(scheduler.RemoteInvokeListener):
+
+    def on_start(self):
+        return super().on_start()
+
+    def on_stop(self):
+        return super().on_stop()
+
+    def on_invoke(self, request, connector):
+        return super().on_invoke(request, connector)
+    
+    def on_invoke_finish(self, resp):
+        return super().on_invoke_finish(resp)
+
+    def on_have(self, server):
+        print('on have')
+        server_cache.push(server.host, server.port, stat=1)
+
+    def on_full(self, server):
+        print('on full')
+        server_cache.push(server.host, server.port, stat=2)
 
 
 class LinkedinAdapter(spider.LinkedinAdapter):
@@ -90,6 +119,7 @@ class LinkedinAdapter(spider.LinkedinAdapter):
 
 
 if __name__ == '__main__':
-    server = scheduler.RemoteInvokeServer('127.0.0.1', 8888, invoke_timeout=10 * 60)
-    # server.add_service(LinkedinService)
+    server = scheduler.RemoteInvokeServer('127.0.0.1', 9999, invoke_timeout=10 * 60, max_connection=1)
+    server.add_listener(InvokeListener())
+    server.add_service(LinkedinService)
     server.start()

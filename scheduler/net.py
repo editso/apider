@@ -17,8 +17,9 @@ class Connector(object):
     def __init__(self, sock):
         self._sock: socket.socket = sock
         self._verify = None
-        self._host = self._sock.getsockname()
-        self._port = self._sock.getpeername()
+        peername = self._sock.getpeername()
+        self._host = peername[0]
+        self._port = peername[1]
 
     def set_verify(self, verify):
         if not isinstance(verify, Verify):
@@ -139,8 +140,6 @@ def listen_tcp(port, handler, host='0.0.0.0') -> Server:
     return tcp_server
 
 
-def connect(host, port, timeout=30) -> Connector:
+def connect(host, port, connector_cls=None, timeout=30) -> Connector:
     sock = socket.create_connection((host, port), timeout=timeout)
-    return DefaultConnector(sock)
-
-
+    return DefaultConnector(sock) if not connector_cls and not callable(connector_cls) else connector_cls(sock)

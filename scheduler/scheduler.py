@@ -159,8 +159,7 @@ class TaskQueue(object):
 
 class Scheduler(object):
 
-    def __init__(self, loop_collect_time: float = 30):
-        self._loop_collect_time = 30
+    def __init__(self):
         self._dispatcher = []
         self._task = TaskQueue()
         self._failure_task = []
@@ -198,6 +197,7 @@ class Scheduler(object):
         """
         while True:
             task_item = self._task.pop()
+            print(task_item)
             dispatch = self._select_dispatch(task_item)
             if dispatch is None:
                 error = self.Error(
@@ -282,7 +282,6 @@ class RemoteInvokeConnector(Connector):
         data = b''
         while True:
             recv_data = self.socket.recv(buff_size)
-            print(recv_data)
             if not recv_data:
                 return data
             data += recv_data
@@ -290,7 +289,6 @@ class RemoteInvokeConnector(Connector):
                 return data[0:-2]
 
     def write(self, data):
-        print("write:{}".format(data))
         try:
             self.socket.sendall(data)
             self.flush()
@@ -314,7 +312,10 @@ class RemoteInvokeConnector(Connector):
             return False
         return True
 
-    def recv_from(self, r: (Request or Response)) -> (Request or Response):
+    def __repr__(self):
+        return "<{}@{}:{}>".format(self.__class__.__name__, self.host, self.port)
+
+    def recv_from(self, r: (Request or Response))->object:
         data = self.read()
         return self.decode(data, r)
 
@@ -327,11 +328,23 @@ class RemoteInvokeConnector(Connector):
 
 class RemoteInvokeListener(object):
 
-    def on_connect(self, connector: Connector):
+    def on_start(self):
         pass
 
-    def on_close(self, connector: Connector):
+    def on_stop(self):
         pass
+
+    def on_invoke(self, request: Request, connector: RemoteInvokeConnector):
+        pass
+
+    def on_invoke_finish(self, resp):
+        pass
+
+    def on_have(self, server):
+        """可以继续接受处理时通知"""
+
+    def on_full(self, server):
+        """处理数量到达最大处理数时通知"""
 
 
 class RemoteInvokeDispatcher(Dispatcher):
@@ -353,8 +366,10 @@ class RemoteInvokeDispatcher(Dispatcher):
         _connector = connector
         _request = request
         try:
+            connector.socket.settimeout(None)
             connector.send_from(_request)
             res = connector.recv_from(Response)
+            logging.debug('resp: {}'.format(res))
             if res is None or int(res.code) in [4004, 5000, 5001, 5002]:
                 self._notify_all_listener("error", _request)
             elif int(res.code) == 200:
@@ -376,16 +391,13 @@ class RemoteInvokeDispatcher(Dispatcher):
         remote_invoke = None
         while not remote_invoke:
             try:
-                while not self._adapter.has_connector():
-                    with self._mutex:
-                        self._mutex.wait(5)
                 remote_invoke = self._adapter.get()
                 if not remote_invoke or not isinstance(remote_invoke, RemoteInvokeConnector):
                     continue
+                break
             except Exception as e:
                 logging.error(
                     "RemoteInvokeConnector An exception occurs", exc_info=e)
-                continue
         return remote_invoke
 
     def _pop_task(self):
@@ -400,9 +412,12 @@ class RemoteInvokeDispatcher(Dispatcher):
     @run_thread()
     def _loop_dispatch_task(self):
         while True:
-            task = self._pop_task()
-            connect = self._select_connector()
-            self._remote_invoke(connect, task)
+            try:
+                task = self._pop_task()
+                connect = self._select_connector()
+                self._remote_invoke(connect, task)
+            except Exception:
+                pass
 
     def can_handle(self, task_item):
         if not isinstance(task_item, Request):
@@ -414,7 +429,7 @@ class RemoteInvokeDispatcher(Dispatcher):
             except Exception as e:
                 logging.debug("Connector Error:{}".format(e), exc_info=e)
             with self._mutex:
-                self._mutex.wait(10)  # 等待10秒,防止僵尸
+                self._mutex.wait(5)
 
     def add_listener(self, listener):
         check_type(listener, DispatchListener)
@@ -468,15 +483,6 @@ class InvokeService(object):
         return obj.method_name == self.method_name and obj.cls_name == self.cls_name
 
 
-class RemoteInvokeListener(object):
-
-    def on_connect(self, connector: Connector):
-        pass
-
-    def on_close(self, connector: Connector):
-        pass
-
-
 class RemoteInvokeServer(TcpServer, Verify):
     """远程调用服务端
     """
@@ -491,7 +497,9 @@ class RemoteInvokeServer(TcpServer, Verify):
         self._service = []
         self._invoke_timeout = invoke_timeout
         self._max_connection = max_connection
-        self._connector = []
+        self._connectors = []
+        self._listeners = []
+        self._full = False
 
     def lock_up(self, cls_name, method_name):
         for item in self._service:
@@ -511,29 +519,55 @@ class RemoteInvokeServer(TcpServer, Verify):
                 self._service.append(service)
 
     def add_listener(self, listener):
-        pass
+        if not isinstance(listener, RemoteInvokeListener):
+            raise TypeError('Need a RemoteInvokeListener')
+        self._listeners.append(listener)
 
     def verify(self, connector: Connector):
+        code = None
+        message = None
         try:
-            print(connector)
             data = connector.read()
-            print(data)
             data = json.loads(data.decode('utf-8'))
             if data['type'] != 'verify':
-                connector.write({'code': 400})
+                code = 400
+                message = 'params error'
             else:
-                if not len(self._connector) >= self._max_connection:
-                    connector.write({'code': 400})
+                if len(self._connectors) >= self._max_connection:
+                    code = 400
+                    message = 'not allow connect'
                 else:
-                    connector.write({'code': 200})
+                    self.__append_running_server(connector)
+                    code = 200
+                    message = 'success'
                     return True
         except Exception:
             pass
+        finally:
+            try:
+                connector.write(bytes(json.dumps({
+                    'code': code or 500,
+                    'message': message or 'no message'
+                }, ensure_ascii=False), encoding='utf-8'))
+            except Exception as e:
+                pass
         return False
+
+    def __append_running_server(self, server):
+        self._connectors.append(server)
+        if len(self._connectors) >= self._max_connection and not self._full:
+            self._full = True
+            self._notify_listener('on_full', self)
+
+    def __recycle_running_server(self, server):
+        self._connectors.remove(server)
+        if self._full:
+            self._full = False
+            self._notify_listener('on_have', self)
 
     @run_thread()
     def handler_remote_invoke(self, conner: RemoteInvokeConnector):
-        req: Request = None
+        req = None
         resp = None
         try:
             resp = None
@@ -550,11 +584,13 @@ class RemoteInvokeServer(TcpServer, Verify):
                     interval=req.timeout or self._invoke_timeout,
                     args=req.args,
                     kwargs=req.kwargs)
-            elif not resp:
-                resp = make_response(data=req, message="找不到服务", code=4004)
+                self._notify_listener('on_invoke', req, conner)
+            elif req and not service:
+                resp = make_response(
+                    data=req.__dict__, message="找不到服务", code=4004)
             if isinstance(result, Response):
                 resp = result
-            else:
+            elif not resp:
                 resp = make_response(data=result)
         except TimeoutError as e:
             logging.debug("Invoke timeout", exc_info=e)
@@ -564,14 +600,38 @@ class RemoteInvokeServer(TcpServer, Verify):
             resp = make_response(data=None, message="未知错误", code=5001)
         finally:
             try:
-                self._connector.remove(conner)
+                self.__recycle_running_server(conner)
             except Exception:
                 pass
-            conner.send_from(resp)
-            conner.close()
+            try:
+                conner.send_from(resp)
+            except Exception:
+                pass
+            try:
+                conner.close()
+            except Exception:
+                pass
+            self._notify_listener('on_invoke_finish', resp)
+
+    def _notify_listener(self, func_name, *args, **kwargs):
+        for item in self._listeners:
+            try:
+                func = getattr(item, func_name)
+                if not callable(func):
+                    continue
+                func(*args, **kwargs)
+            except Exception as e:
+                logging.debug('notify exception', exc_info=e)
+
+    def stop(self):
+        super().stop()
+        self._notify_listener('on_stop')
 
     def start(self):
-        logging.info("Started Server, {}:{}".format(self.host, self.port))
+        logging.info("Started Server, {}:{}, max connect: {}".format(
+            self.host, self.port, self._max_connection))
+        self._notify_listener('on_start')
+        self._notify_listener('on_have', self)  
         while True:
             sock, addr = self.socket.accept()
             remote_conner = RemoteInvokeConnector(sock)
@@ -582,8 +642,26 @@ class RemoteInvokeServer(TcpServer, Verify):
                 except Exception:
                     pass
                 continue
-            self._connector.append(remote_conner)
-            self.handler_remote_invoke(remote_conner)
+            try:
+                self.handler_remote_invoke(remote_conner)
+            except Exception:
+                pass
+
+
+class ConnectionVerify(Verify):
+
+    def verify(self, connector: RemoteInvokeConnector):
+        try:
+            if not connector.write(bytes(json.dumps({'type': 'verify'}, ensure_ascii=False), encoding='utf8')):
+                return False
+            data = connector.read()
+            resp = json.loads(data)
+            if resp['code'] == 200:
+                return True
+            return False
+        except Exception as e:
+            pass
+        return False
 
 
 class RemoteService(object):
@@ -623,7 +701,7 @@ class RemoteServer(object):
     远程服务器
     """
 
-    def pull(self, name=None, mark=None):
+    def pull(self, name=None, mark=None)->tuple:
         pass
 
     def push(self, host, port, mark=None, verify=None):
@@ -658,7 +736,10 @@ class ElasticRemoteServer(RemoteServer):
 
     def __init__(self, es, index_name=None, verify_certs=False, **kwargs):
         self._es = elasticsearch.Elasticsearch(
-            es, verify_certs=verify_certs, **kwargs)
+            es,
+            ssl_show_warn=None,
+            verify_certs=verify_certs,
+            **kwargs)
         self._index_name = index_name or 'remote_servers'
         self.init()
 
@@ -692,7 +773,6 @@ class ElasticRemoteServer(RemoteServer):
             'mark': mark or 'none',
             'verify': verify or {}
         }
-        print(body)
         if not self._es.exists(self._index_name, e_id):
             self._es.index(self._index_name, body=body,
                            id=e_id, refresh='wait_for')
@@ -716,44 +796,40 @@ class RemoteServerAdapter(ConnectorAdapter, Verify):
 
     def verify(self, connector: RemoteInvokeConnector):
         try:
-            print("verisy")
-            connector.send_from()
-            if not connector.write(bytes("aaaaaaaaaaaaaaaaaaaaaaaa")):
+            if not connector.write(bytes(json.dumps({'type': 'verify'}, ensure_ascii=False), encoding='utf8')):
                 return False
             data = connector.read()
-            print(data)
-            data = json.loads(data.encode('utf-8'))
-            print(data)
-            if data['code'] == 200:
+            resp = json.loads(data)
+            if resp['code'] == 200:
                 return True
             return False
         except Exception as e:
-            print(e)
             pass
         return False
+
+    def wait(self):
+        if self._queue.empty():
+            with self._mutex:
+                self._mutex.wait(timeout=self._timeout)
 
     def has_connector(self):
         while True:
             try:
                 server = self._remote.pull(mark=['none', 'wait'])
                 if server is not None:
-                    host = server['host']
-                    port = server['port']
-                    sock = socket.create_connection((host, port))
+                    host, port = server
+                    sock = socket.create_connection(
+                        (host, port), timeout=self._timeout)
                     connector = RemoteInvokeConnector(sock)
                     connector.set_verify(self)
-                    self.verify(connector)
-                    # if connector.available():
-                    #     self._queue.put(connector)
-                    #     break
-                    # connector.close()
+                    if connector.available():
+                        self._queue.put(connector)
+                        break
+                    else:
+                        connector.close()
             except Exception as e:
-                logging.error("connect error", exc_info=e)
-            try:
-                with self._mutex:
-                    self._mutex.wait(self._timeout)
-            except Exception:
-                pass
+                logging.debug("connect error", exc_info=e)
+            self.wait()
         return not self._queue.empty()
 
     def get(self):

@@ -1,5 +1,6 @@
 import argparse
 import storage
+import scheduler
 
 
 mapper_engine = storage.make_mysql('root', '79982473', 'test')
@@ -15,9 +16,27 @@ def account():
 
 
 def host():
-    host_cache.push('127.0.0.1', 8080)
-    print(host_cache.get())
+    host_cache.push('127.0.0.1', 9999, stat=1)
+    host_cache.push('127.0.0.1', 8888, stat=1)
+    print(host_cache.get(stat=1, count=10))
+
+
+a = 10
+
+pipe = scheduler.multiprocessing.Pipe()
+@scheduler.run_thread()
+@scheduler.process_poller(interval=1)
+def poller():
+    pipe[0].send("hello")
+
+
+@scheduler.run_thread()
+@scheduler.process_poller(interval=1)
+def poller2():
+    print(pipe[1].recv())
+
+
+
 
 if __name__ == '__main__':
-    # account()
     host()

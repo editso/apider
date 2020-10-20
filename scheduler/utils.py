@@ -2,6 +2,46 @@ import multiprocessing
 import threading
 import logging
 import hashlib
+import time
+
+
+class ProcessPoller(object):
+
+    def __init__(self, target=None, interval=10, count=None, args=None, kwargs=None):
+        """
+        @param interval 间隔时间
+        @param count 执行次数, 默认一直执行直到程序退出
+        """
+        self._func = target
+        self._count = count
+        self._step = 0
+        self._has_count = isinstance(self._count, int)
+        self._interval = interval
+        self._args = args
+        self._kwargs = kwargs or {}
+        self._proc = multiprocessing.Process(target=self.__process_target())
+    
+    def __continue(self):
+        try:
+            return self._count > self._step if self._has_count else True
+        finally:
+            if self._has_count:
+                self._step += 1
+
+    def __process_target(self):
+        while self.__continue():
+            try:
+                self._func()
+                time.sleep(self._interval)
+            except Exception:
+                pass
+
+    def stop(self):
+        self._proc.terminate()
+
+    def start(self):
+        self._proc.start()
+
 
 def check_type(o, o_type, err=None):
     if not isinstance(o, o_type):
@@ -19,9 +59,7 @@ def run_process(name=None, deamon=False):
             proc.start()
             logging.debug("Process Started, pid: {}".format(proc.pid))
             return proc
-
         return set_args
-
     return wrapper
 
 
@@ -34,9 +72,7 @@ def run_thread(name=None):
                 target=func, name=name, args=s_args, **s_kwargs)
             c_thread.start()
             return c_thread
-
         return set_args
-
     return wrapper
 
 
@@ -45,7 +81,6 @@ def run_timer(interval=10, never=False):
         def set_args(*args, **kwargs):
             _interval = kwargs.get("interval", interval)
             _never = kwargs.get("never", never)
-            print(_interval)
             try:
                 del kwargs['interval']
                 del kwargs['never']
@@ -122,6 +157,15 @@ class PipeProcess(object):
         return self._pipe[0].recv()
 
 
+def process_poller(**a_kwargs):
+    def decorator(func):
+        def wrapper(*args,**kwargs):
+            poller = ProcessPoller(target=func, args=args, kwargs=kwargs, **a_kwargs)
+            poller.start()
+        return wrapper
+    return decorator
+
+
 def fun_proxy(func, *args, **kwargs):
     def proxy(*args, **kwargs):
         return func(*args, **kwargs)
@@ -134,9 +178,10 @@ def object_proxy(o):
 
     return proxy
 
-
 def make_timer_process(func, interval, args=(), kwargs=None):
     return TimerProcess(func, interval=interval, args=args, kwargs=dict(kwargs or {})).start_wait_result()
+
+
 
 def md5_hex_digest(s: str, encode='utf8'):
     return hashlib.md5(s.encode(encode)).hexdigest()

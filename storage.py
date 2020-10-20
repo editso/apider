@@ -32,20 +32,28 @@ class DatabaseStorage(Storage):
         self._engine = engine
         self._mapper_cls = mapper_cls
         Base.metadata.create_all(self._engine)
+        self._session = None
+
+    @property
+    def session(self):
+        if self._session:
+            self._session.commit()
+            self._session.close()
         self._session = sessionmaker(self._engine).__call__()
+        return self._session
 
     @staticmethod
     def get_tuple(query):
-        return query if not isinstance(query, Iterable) else tuple(query)
+        return tuple([query]) if not isinstance(query, Iterable) else tuple(query)
 
     def get(self, query, count):
-        return self._session.query(self._mapper_cls) \
-            .filter(*DatabaseStorage.get_tuple(query)) \
-            .limit(count) \
-            .all()
+        return self.session.query(self._mapper_cls) \
+                .filter(*DatabaseStorage.get_tuple(query)) \
+                .limit(count) \
+                .all()
 
     def set(self, query, update_columns, *args):
-        self._session.query(self._mapper_cls).filter(
+        self.session.query(self._mapper_cls).filter(
             *DatabaseStorage.get_tuple(query)
         ).update(update_columns)
         self.commit()
@@ -105,11 +113,11 @@ class UrlStorage(DatabaseStorage):
     def push(self, group, url, stat, *args):
         if not self.check(stat):
             return
-        if not self._session.query(self._mapper_cls).get(url):
-            self._session.add(self._mapper_cls(
+        if not self.session.query(self._mapper_cls).get(url):
+            self.session.add(self._mapper_cls(
                 u_target=url, u_group=group, u_stat=stat or self.stat['wait']))
         elif self.check(stat):
-            self._session.query(self._mapper_cls) \
+            self.session.query(self._mapper_cls) \
                 .filter(self._mapper_cls.u_target == url).update({
                     'u_group': group,
                     'u_stat': stat
@@ -166,13 +174,13 @@ class AccountStorage(DatabaseStorage):
 
     def push(self, group, account, password, stat=1):
         u_id = self.gen_id(group, account)
-        o_account = self._session.query(self._mapper_cls).get(u_id)
+        o_account = self.session.query(self._mapper_cls).get(u_id)
         if o_account and (o_account.u_password != password or o_account.u_stat != stat):
-            self._session.query(self._mapper_cls)\
+            self.session.query(self._mapper_cls)\
                 .filter(self._mapper_cls.u_id == u_id)\
                 .update({'u_password': password, 'u_stat': stat})
         elif not o_account:
-            self._session.add(
+            self.session.add(
                 self._mapper_cls(
                     u_id=u_id,
                     u_group=group,
@@ -198,10 +206,12 @@ class HostStorage(DatabaseStorage):
         h_ver_type = Column(Integer)
         h_stat = Column(Integer, nullable=False)
 
+        def __repr__(self):
+            return "{}:{}".format(self.h_host, self.h_port)
+
     def __init__(self, engine):
         super().__init__(engine, HostStorage.HostInfo)
 
-    
     def _base_query(self, query):
         if query is None:
             return ()
@@ -215,25 +225,25 @@ class HostStorage(DatabaseStorage):
     def get(self, stat=1, count=1):
         return super().get(
             query=[
-                or_(self._base_query(stat))
+                or_(*self._base_query(stat))
             ],
-            count=1
+            count=count
         )
 
     def push(self, host, port, stat=1, ver_type=None):
         if not self.check(stat):
             return
         h_id = self.gen_id(host, port)
-        o_host = self._session.query(self._mapper_cls).get(h_id)
+        o_host = self.session.query(self._mapper_cls).get(h_id)
         if o_host and (o_host.h_stat != stat):
             super().set(
                 query=self._mapper_cls.h_id == h_id,
                 update_columns={
-                    'stat': stat
+                    'h_stat': stat
                 }
             )
         elif not o_host:
-            self._session.add(
+            self.session.add(
                 self._mapper_cls(
                     h_id=h_id,
                     h_host=host,

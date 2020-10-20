@@ -111,8 +111,4 @@ storage = UrlStorage(engine)
 storage.push('user_info', 'http://editso.com', 2)
 storage.push('user_info', 'http://editso.com://', 1)
 storage.set('user_info', [1, 2], 1)
-
 print(storage.get('user_info', 10, 1))
-
-
-
