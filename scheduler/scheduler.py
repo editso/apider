@@ -14,11 +14,27 @@ import json
 
 class Task(object):
 
+    def retry(self, task):
+        """失败重试"""
+
     def has_task(self):
         return False
 
     def next_task(self):
         pass
+
+
+class TaskWrapper(object):
+
+    def __init__(self, task, task_item):
+        self._task = task
+        self._task_item = task_item
+
+    def origin(self):
+        return self._task
+
+    def get(self):
+        return self._task_item
 
 
 class ErrorTask(Task):
@@ -138,19 +154,21 @@ class TaskQueue(object):
         self._queue = Queue()
         self._cur_task: Task = None
 
-    def pop(self) -> Task:
+    def pop(self) -> TaskWrapper:
         task_item = None
         while task_item is None:
             try:
                 if not self._cur_task:
+                    logging.info('Get task')
                     self._cur_task = self._queue.get()
                 if not self._cur_task.has_task():
+                    self._queue.put(self._cur_task)
                     self._cur_task = None
                     continue
                 task_item = self._cur_task.next_task()
             except Exception as e:
                 logging.debug("Get Task Error", exc_info=e)
-        return task_item
+        return TaskWrapper(self._cur_task, task_item)
 
     def push(self, task: Task):
         check_type(task, Task)
@@ -198,14 +216,14 @@ class Scheduler(object):
         """
         logging.info("Scheduler Started!")
         while True:
-            task_item = self._task.pop()
-            dispatch = self._select_dispatch(task_item)
+            task_wrapper = self._task.pop()
+            dispatch = self._select_dispatch(task_wrapper)
             if dispatch is None:
                 error = self.Error(
-                    task=task_item, description="Not Found Dispatcher")
+                    task=task_wrapper, description="Not Found Dispatcher")
                 self._task_error(error)
                 continue
-            self._dispatch(dispatch, task_item)
+            self._dispatch(dispatch, task_wrapper)
 
     class Error(object):
         description = None
@@ -363,30 +381,32 @@ class RemoteInvokeDispatcher(Dispatcher):
         self._listener = []
 
     @run_thread()
-    def _remote_invoke(self, connector: RemoteInvokeConnector, request: Request):
+    def _remote_invoke(self, connector: RemoteInvokeConnector, task_wrapper: TaskWrapper):
         logging.info('dispatch {} to {}:{}'.format(
-            request, connector.host, connector.port))
+            task_wrapper, connector.host, connector.port))
         _connector = connector
-        _request = request
+        _wrapper = task_wrapper
+        _request = task_wrapper.get()
         try:
             connector.socket.settimeout(None)
             connector.send_from(_request)
             res = connector.recv_from(Response)
             logging.debug('resp: {}'.format(res))
             if res is None or int(res.code) in [4004, 5000, 5001, 5002]:
-                self._notify_all_listener("error", _request)
+                _wrapper.origin().retry(_request)
+                self._notify_all_listener("error", _wrapper)
             elif int(res.code) == 200:
-                self._notify_all_listener("success", res, _request)
+                self._notify_all_listener("success", res, _wrapper)
         except Exception as e:
             logging.debug("Invoke Error", exc_info=e)
-            self._notify_all_listener("error", _request)
+            self._notify_all_listener("error", _wrapper)
         finally:
             try:
                 connector.close()
             except Exception:
                 pass
             try:
-                self._adapter.finish(_connector, _request)
+                self._adapter.finish(_connector, _wrapper)
             except Exception:
                 pass
 
@@ -414,7 +434,7 @@ class RemoteInvokeDispatcher(Dispatcher):
 
     @run_thread()
     def _loop_dispatch_task(self):
-        logging.info("Loop dispatch task")
+        logging.info("Loop dispatch task started")
         while True:
             try:
                 task = self._pop_task()
@@ -423,8 +443,8 @@ class RemoteInvokeDispatcher(Dispatcher):
             except Exception as e:
                 logging.debug('dispatch exception', exc_info=e)
 
-    def can_handle(self, task_item):
-        if not isinstance(task_item, Request):
+    def can_handle(self, task_wrapper: TaskWrapper):
+        if not isinstance(task_wrapper.get(), Request):
             return False
         while True:
             try:
@@ -453,8 +473,8 @@ class RemoteInvokeDispatcher(Dispatcher):
             except Exception as e:
                 logging.debug('notify listener', exc_info=e)
 
-    def dispatch(self, task_item):
-        self._remote_task.append(task_item)
+    def dispatch(self, task_wrapper):
+        self._remote_task.append(task_wrapper)
         self._notify()
 
 
@@ -556,8 +576,9 @@ class RemoteInvokeServer(TcpServer, Verify):
                     'code': code or 500,
                     'message': message or 'no message'
                 }, ensure_ascii=False), encoding='utf-8'))
-            except Exception as e:
-                pass
+            except Exception:
+                logging.info('Disconnect: {}:{}'.format(
+                    connector.host, connector.port))
         return False
 
     def __append_running_server(self, server):
@@ -602,10 +623,10 @@ class RemoteInvokeServer(TcpServer, Verify):
             elif not resp:
                 resp = make_response(data=result)
         except TimeoutError as e:
-            logging.debug("Invoke timeout", exc_info=e)
+            logging.debug("Invoke timeout: ", exc_info=e)
             resp = make_response(data=req.__dict__, message="调用超时", code=5002)
         except Exception as e:
-            logging.debug("Invoke error: {}".format(e), exc_info=e)
+            logging.debug("Invoke error: ", exc_info=e)
             resp = make_response(data=None, message="未知错误", code=5001)
         finally:
             try:
@@ -620,6 +641,7 @@ class RemoteInvokeServer(TcpServer, Verify):
                 conner.close()
             except Exception:
                 pass
+            logging.info('Disconnect: {}:{}'.format(conner.host, conner.port))
             self._notify_listener('on_invoke_finish', resp)
 
     def _notify_listener(self, func_name, *args, **kwargs):

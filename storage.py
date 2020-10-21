@@ -33,26 +33,28 @@ class DatabaseStorage(Storage):
         self._engine = engine
         self._mapper_cls = mapper_cls
         Base.metadata.create_all(self._engine)
-        self._session = None
+        self._session = sessionmaker(self._engine).__call__()
 
     @property
     def session(self):
-        if self._session:
-            self._session.commit()
-            self._session.close()
-        self._session = sessionmaker(self._engine).__call__()
-        return self._session
+        try:
+            return self._session
+        finally:
+            print("...")
+            self._session.expire_all()
+            self._session.flush()
 
     @staticmethod
     def get_tuple(query):
         return tuple([query]) if not isinstance(query, Iterable) else tuple(query)
 
     def get(self, query, count):
+        print("getter")
         return self.session.query(self._mapper_cls) \
                 .filter(*DatabaseStorage.get_tuple(query)) \
                 .limit(count) \
                 .all()
-
+        
     def set(self, query, update_columns, *args):
         self.session.query(self._mapper_cls).filter(
             *DatabaseStorage.get_tuple(query)
@@ -67,7 +69,7 @@ class DatabaseStorage(Storage):
         return (self._mapper_cls.u_stat == item for item in filter(lambda item: self.check(item), query))
 
     def commit(self):
-        self._session.commit()
+        self.session.commit()
 
 
 class UrlStorage(DatabaseStorage):
@@ -100,9 +102,12 @@ class UrlStorage(DatabaseStorage):
         super().__init__(engine, UrlStorage.UrlInfo)
 
     def get(self, group, count=1, stat=(1, 3)):
-        return super().get(query=[or_(*self._base_query(stat)),
+        data = super().get(query=[or_(*self._base_query(stat)),
                                   self._mapper_cls.u_group == group],
                            count=count)
+        for item in data:
+            self.push(group, item.u_target, 4)
+        return data
 
     def set(self, group, query, stat=1):
         if not self.check(stat):
@@ -111,7 +116,7 @@ class UrlStorage(DatabaseStorage):
                            or_(*self._base_query(query))],
                     update_columns={'u_stat': stat})
 
-    def push(self, group, url, stat, *args):
+    def push(self, group, url, stat=1, *args, **kwargs):
         if not self.check(stat):
             return
         if not self.session.query(self._mapper_cls).get(url):
