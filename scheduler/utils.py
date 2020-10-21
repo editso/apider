@@ -29,14 +29,18 @@ class ProcessPoller(object):
                 self._step += 1
 
     def __process_target(self):
+        logging.info('Poller running, target: {}'.format(self._func.__name__))
         while self.__continue():
             try:
                 self._func()
+            except Exception as e:
+                logging.debug("Poller running error:", exc_info=e)
+            finally:
                 time.sleep(self._interval)
-            except Exception:
-                pass
+        self.stop()
 
     def stop(self):
+        logging.info('Poller stop')
         self._proc.terminate()
 
     def start(self):

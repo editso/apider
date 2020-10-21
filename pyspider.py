@@ -39,9 +39,10 @@ __base_config__ = {
 class LinkedinAdapter(spider.LinkedinAdapter):
 
     def __init__(self, *args, **kwargs):
-        self.account = spider.LinkedAccount(*args, **kwargs)
-        self.cache = spider.linkedin_cache(**kwargs)
-        self.storage = spider.ElasticStorage(**kwargs)
+        # self.account = spider.LinkedAccount(*args, **kwargs)
+        # self.cache = spider.linkedin_cache(**kwargs)
+        # self.storage = spider.ElasticStorage(**kwargs)
+        pass
 
     def get_account(self):
         return self.account
@@ -49,9 +50,9 @@ class LinkedinAdapter(spider.LinkedinAdapter):
     def get_driver(self):
         chrome_options = selenium.webdriver.ChromeOptions()
         chrome_options.add_experimental_option('w3c', False)
-        # return selenium.webdriver.Chrome(options=chrome_options)
-        return selenium.webdriver.Remote(command_executor="http://172.16.2.129:4444/wd/hub",
-                                         options=chrome_options)
+        return selenium.webdriver.Chrome(options=chrome_options)
+        # return selenium.webdriver.Remote(command_executor="http://172.16.2.129:4444/wd/hub",
+        #                                  options=chrome_options)
 
     def get_cache(self):
         return self.cache
@@ -71,7 +72,8 @@ class LinkedinService(scheduler.RemoteService):
 class DispatcherListener(scheduler.DispatchListener):
 
     def error(self, request, *args, **kwargs):
-        print("error", request)
+        # print("error", request)
+        pass
 
     def success(self, res, request, **kwargs):
         print(res)
@@ -85,18 +87,17 @@ class ConnectAdapter(scheduler.ConnectorAdapter, scheduler.Verify):
         self._max_server = max_server
         self._verify = scheduler.ConnectionVerify()
         self._queue = multiprocessing.Queue(self._max_server)
+        self._cache: storage.HostStorage = cache
         self.__make_process()
-        self._cache = cache
 
     @scheduler.run_thread()
     def __make_process(self):
-        self._poller = scheduler.ProcessPoller(
-            target=self.__loop_get_server, interval=5)
+        self._poller = scheduler.ProcessPoller(target=self.__loop_get_server, interval=5)
         self._poller.start()
 
     def __loop_get_server(self):
         if not self.__servers__:
-            self.__servers__ = set(self.cache.get(count=5))
+            self.__servers__ = set(self._cache.get(count=100))
         if not self.__servers__:
             return
         for server in self.__servers__:
@@ -109,7 +110,7 @@ class ConnectAdapter(scheduler.ConnectorAdapter, scheduler.Verify):
                     self._queue.put(connector)
                 else:
                     connector.close()
-            except Exception as e:
+            except Exception:
                 pass
         self.__servers__.clear()
 
@@ -140,8 +141,8 @@ class InvokeListener(scheduler.RemoteInvokeListener):
     def on_have(self, server):
         self._cache.push(server.host, server.port, stat=1)
 
-    def on_full(self, server):
-        self._cache.push(server.host, server.port, stat=2)
+    # def on_full(self, server):
+    #     self._cache.push(server.host, server.port, stat=2)
 
 
 class LinkedinTask(scheduler.Task):
@@ -156,9 +157,9 @@ class LinkedinTask(scheduler.Task):
             # data = self._cache.pop()
             # self._url = data['url']
             self._url = '11111'
-            if self.count == 9:
-                return False
-            self.count += 1
+            # if self.count == 9:
+            #     return False
+            # self.count += 1
             return self._url is not None
         except Exception:
             return False
@@ -191,11 +192,8 @@ class MysqlCache(spider.Cache):
 
 
 def load_config(config):
-    try:
-        with open(config, 'r', encoding='utf-8') as c:
-            __base_config__.update(json.loads(c.read()))
-    except Exception:
-        pass
+    with open(config, 'r', encoding='utf-8') as c:
+        __base_config__.update(json.loads(c.read()))
 
 
 def run_scheduler(args):
@@ -225,16 +223,14 @@ def run_server(args):
     server.add_service(LinkedinService)
     server.start()
 
+
 def run_show(args):
     print(json.dumps(__base_config__))
+
 
 def main():
     parser = argparse.ArgumentParser(sys.argv[0].split('.')[0])
     parser.set_defaults(func=run_server)
-    parser.add_argument('-d', '--debug', default=False)
-    parser.add_argument('-D', '--deamon', default=False)
-    parser.add_argument('-c', '--config')
-    
     sub_parser = parser.add_subparsers()
 
     s_scheduler = sub_parser.add_parser('scheduler')
@@ -253,19 +249,25 @@ def main():
         '-t', '--type', choices=['url', 'host', 'account'], required=True)
     other.add_argument('-d', '--data', required=True)
 
+    parser.add_argument('-d', '--debug', default=False)
+    parser.add_argument('-D', '--deamon', default=False)
+    parser.add_argument('-c', '--config', required=True)
+
     show = sub_parser.add_parser('show-config')
     show.set_defaults(func=run_show)
-  
+
     args = parser.parse_args()
     if args.debug:
         logging.basicConfig(level=logging.DEBUG)
-    load_config(args.config)
+    else:
+        logging.basicConfig(level=logging.INFO)
     try:
+        load_config(args.config)
         args.func(args.__dict__)
-    except AttributeError as e:
+    except AttributeError:
         parser.print_help()
     except Exception as e:
-        print("ERROR:\n {}\n".format(e))
+        print("ERROR:\n{}\n".format(e))
         parser.print_help()
 
 

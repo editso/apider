@@ -6,6 +6,16 @@ from .utils import run_thread
 logger = logging.getLogger(__name__)
 
 
+
+def get_local_host():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(('8.8.8.8', 80))
+        return sock.getsockname()[0]
+    finally:
+        sock.close()
+    
+
 class Verify(object):
 
     def verify(self, connect):

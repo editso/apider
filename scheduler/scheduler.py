@@ -51,7 +51,7 @@ class Request(object):
         self.timeout = timeout
 
     def __repr__(self):
-        return str(self.__dict__)
+        return "{}@{}#{}".format(self.cls_name, self.method_name, self.timeout)
 
 
 class Response(object):
@@ -92,7 +92,7 @@ class Reporter(object):
 
 class SMTPReporter(Reporter):
 
-    def __init__(self, sender, receives: []):
+    def __init__(self, sender, receives):
         super().__init__()
         self._sender = sender
         self._receives = receives
@@ -176,6 +176,7 @@ class Scheduler(object):
         self._task.push(task)
 
     def _select_dispatch(self, task) -> Dispatcher:
+        logging.debug('select dispatch')
         for dispatcher in self._dispatcher:
             if dispatcher.can_handle(task):
                 return dispatcher
@@ -184,7 +185,7 @@ class Scheduler(object):
         self._failure_task.append(error)
 
     def _dispatch(self, dispatcher: Dispatcher, task_item):
-        logging.debug("dispatch: {}".format(task_item))
+        logging.info("Dispatch: {}".format(task_item))
         try:
             dispatcher.dispatch(task_item)
         except Exception as e:
@@ -195,9 +196,9 @@ class Scheduler(object):
     def dispatch(self):
         """开始派发任务
         """
+        logging.info("Scheduler Started!")
         while True:
             task_item = self._task.pop()
-            print(task_item)
             dispatch = self._select_dispatch(task_item)
             if dispatch is None:
                 error = self.Error(
@@ -315,7 +316,7 @@ class RemoteInvokeConnector(Connector):
     def __repr__(self):
         return "<{}@{}:{}>".format(self.__class__.__name__, self.host, self.port)
 
-    def recv_from(self, r: (Request or Response))->object:
+    def recv_from(self, r: (Request or Response)) -> object:
         data = self.read()
         return self.decode(data, r)
 
@@ -363,6 +364,8 @@ class RemoteInvokeDispatcher(Dispatcher):
 
     @run_thread()
     def _remote_invoke(self, connector: RemoteInvokeConnector, request: Request):
+        logging.info('dispatch {} to {}:{}'.format(
+            request, connector.host, connector.port))
         _connector = connector
         _request = request
         try:
@@ -411,13 +414,14 @@ class RemoteInvokeDispatcher(Dispatcher):
 
     @run_thread()
     def _loop_dispatch_task(self):
+        logging.info("Loop dispatch task")
         while True:
             try:
                 task = self._pop_task()
                 connect = self._select_connector()
                 self._remote_invoke(connect, task)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug('dispatch exception', exc_info=e)
 
     def can_handle(self, task_item):
         if not isinstance(task_item, Request):
@@ -441,10 +445,13 @@ class RemoteInvokeDispatcher(Dispatcher):
 
     def _notify_all_listener(self, name, *args, **kwargs):
         for item in self._listener:
-            if name == 'error':
-                item.error(*args, **kwargs)
-            elif name == 'success':
-                item.success(*args, **kwargs)
+            try:
+                if name == 'error':
+                    item.error(*args, **kwargs)
+                elif name == 'success':
+                    item.success(*args, **kwargs)
+            except Exception as e:
+                logging.debug('notify listener', exc_info=e)
 
     def dispatch(self, task_item):
         self._remote_task.append(task_item)
@@ -567,6 +574,8 @@ class RemoteInvokeServer(TcpServer, Verify):
 
     @run_thread()
     def handler_remote_invoke(self, conner: RemoteInvokeConnector):
+        logging.info('Handler remote Invoke: {}:{}'.format(
+            conner.host, conner.port))
         req = None
         resp = None
         try:
@@ -628,10 +637,10 @@ class RemoteInvokeServer(TcpServer, Verify):
         self._notify_listener('on_stop')
 
     def start(self):
-        logging.info("Started Server, {}:{}, max connect: {}".format(
+        logging.info("Started Remote Server\nListen:{}:{}, max connect: {}".format(
             self.host, self.port, self._max_connection))
         self._notify_listener('on_start')
-        self._notify_listener('on_have', self)  
+        self._notify_listener('on_have', self)
         while True:
             sock, addr = self.socket.accept()
             remote_conner = RemoteInvokeConnector(sock)
@@ -701,7 +710,7 @@ class RemoteServer(object):
     远程服务器
     """
 
-    def pull(self, name=None, mark=None)->tuple:
+    def pull(self, name=None, mark=None) -> tuple:
         pass
 
     def push(self, host, port, mark=None, verify=None):
