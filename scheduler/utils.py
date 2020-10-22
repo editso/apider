@@ -5,6 +5,9 @@ import hashlib
 import time
 
 
+logger = logging.getLogger(__name__)
+
+
 class ProcessPoller(object):
 
     def __init__(self, target=None, interval=10, count=None, args=None, kwargs=None):
@@ -29,18 +32,18 @@ class ProcessPoller(object):
                 self._step += 1
 
     def __process_target(self):
-        logging.info('Poller running, target: {}'.format(self._func.__name__))
+        logger.info('Poller running, target: {}'.format(self._func.__name__))
         while self.__continue():
             try:
                 self._func()
             except Exception as e:
-                logging.debug("Poller running error:", exc_info=e)
+                logger.debug("Poller running error:", exc_info=e)
             finally:
                 time.sleep(self._interval)
         self.stop()
 
     def stop(self):
-        logging.info('Poller stop')
+        logger.info('Poller stop')
         self._proc.terminate()
 
     def start(self):
@@ -61,7 +64,7 @@ def run_process(name=None, deamon=False):
                                            name=name,
                                            args=args)
             proc.start()
-            logging.debug("Process Started, pid: {}".format(proc.pid))
+            logger.debug("Process Started, pid: {}".format(proc.pid))
             return proc
         return set_args
     return wrapper
@@ -116,27 +119,28 @@ class TimerProcess(object):
 
     def _proxy_invoke(self, *args, **kwargs):
         try:
-            logging.debug("wait process: {}, pid: {}".format(self._proc.name, self._proc.pid))
+            logger.debug("wait process: {}, pid: {}".format(self._proc.name, self._proc.pid))
             res = self._target(*args, **kwargs)
             self._result.put(res)
         except Exception as e:
             self._result.put(e)
 
     def start_wait_result(self):
+        res = None
         try:
             self._proc.start()
             res = self._result.get(timeout=self._interval)
             self._proc.join()
             if isinstance(res, Exception):
-                raise ValueError(res.args)
+                raise ValueError
             return res
-        except ValueError as e:
-            raise e
+        except ValueError:
+            raise res
         except Exception:
             raise TimeoutError()
         finally:
             if self._proc.is_alive():
-                self._proc.kill()
+                self._proc.terminate()
 
 
 class PipeProcess(object):

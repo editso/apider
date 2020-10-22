@@ -1,8 +1,8 @@
-from logging import *
 import json
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, logger
 from .utils import dynamic_attr, remove_url_end, md5_hex_digest
 import urllib3
+import logging
 
 urllib3.disable_warnings()
 
@@ -33,6 +33,7 @@ class ElasticStorage(Storage):
                  scheme="http",
                  verify_certs=False,
                  type_name="data"):
+        logger.setLevel(logging.ERROR)
         self._es = Elasticsearch(hosts,
                                  http_auth=(user, password),
                                  scheme=scheme,
@@ -175,8 +176,7 @@ class Spider(object):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type:
-            error("Spider Error")
+        pass
 
     def unique_id(self, content: str = None):
         unique_id = None

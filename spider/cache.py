@@ -5,6 +5,8 @@ from spider.spider import ElasticStorage
 from .utils import dynamic_attr, get_localtime, md5_hex_digest
 import json
 import threading
+from os import path
+import os
 
 
 class ElasticCache(Cache):
@@ -42,16 +44,19 @@ class ElasticCache(Cache):
         index = kwargs.get('cache_name', self._cache_name)
         e_id = md5_hex_digest(json.dumps(value, ensure_ascii=False))
         data = self._cache.get(index, e_id=e_id, _source=True)
+        tmp = {
+            'date': get_localtime(),
+            'cache_stat': stat,
+            'data': value
+        }
         if not data:
-            self._cache.save(index, {
-                'date': get_localtime(),
-                'cache_stat': stat,
-                'data': value
-            }, e_id=e_id)
+            self._cache.save(index, tmp, e_id=e_id)
+        else:
+            self._cache.update(index, e_id, tmp)
         self._lock.release()
 
-    def push(self, value, **kwargs):
-        self._update(value, self._dynamic.wait, **kwargs)
+    def push(self, value, stat=None, **kwargs):
+        self._update(value, stat or self._dynamic.wait, **kwargs)
 
     def reset_stat(self, index, old_stat: list, new_stat):
         stats = list(old_stat)
@@ -59,7 +64,7 @@ class ElasticCache(Cache):
         for item in stats:
             if not self.stat.get(item):
                 raise TypeError("Bad Stat")
-        stats.remove(new_stat)        
+        stats.remove(new_stat)
         while True:
             data = self._cache.terms_query(index, query={
                 'cache_stat': list(old_stat)
@@ -148,6 +153,60 @@ class QueueCache(Cache):
 
     def size(self):
         return self._queue.qsize()
+
+
+class LocalCache(Cache):
+
+    def __init__(self, group, filename):
+        self._group = group
+        self._filename = filename
+        self._source = {}
+        self._data = []
+        dir = path.dirname(self._filename)
+        if dir and not path.exists(dir):
+            os.makedirs(dir)
+        self._load()
+
+    def _load(self):
+        try:
+            with open(self._filename, 'r', encoding='utf8') as f:
+                self._source = json.loads(f.read())
+                self._data = self._source[self._group]
+        except Exception as e:
+            pass
+
+    def _write(self):
+        try:
+            self._source[self._group] = self._data
+            with open(self._filename, 'w+', encoding='utf8') as f:
+                f.write(json.dumps(self._source, ensure_ascii=False))
+        except Exception:
+            pass
+
+    def push(self, data):
+        for item in self._data:
+            if md5_hex_digest(json.dumps(data)) == md5_hex_digest(json.dumps(item)):
+                return
+        self._data.append(data)
+        self._write()
+
+    def remove(self, value):
+        self._data.remove(value)
+        self._write()
+
+    def pop(self):
+        if not self._data:
+            return None
+        try:
+            return self._data.pop(0)
+        finally:
+            self._write()
+
+    def empty(self):
+        return self.size() <= 0
+
+    def size(self):
+        return len(self._data)
 
 
 def elastic_cache(*args, **kwargs) -> ElasticCache:

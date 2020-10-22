@@ -11,6 +11,7 @@ import datetime
 Base = declarative_base()
 
 
+
 class Storage(object):
     stat = {}
 
@@ -33,23 +34,20 @@ class DatabaseStorage(Storage):
         self._engine = engine
         self._mapper_cls = mapper_cls
         Base.metadata.create_all(self._engine)
-        self._session = sessionmaker(self._engine).__call__()
+        self._session = None
 
     @property
     def session(self):
-        try:
+        if self._session:
             return self._session
-        finally:
-            print("...")
-            self._session.expire_all()
-            self._session.flush()
-
+        self._session = sessionmaker(self._engine).__call__()
+        return self._session
+       
     @staticmethod
     def get_tuple(query):
         return tuple([query]) if not isinstance(query, Iterable) else tuple(query)
 
     def get(self, query, count):
-        print("getter")
         return self.session.query(self._mapper_cls) \
                 .filter(*DatabaseStorage.get_tuple(query)) \
                 .limit(count) \
@@ -107,6 +105,7 @@ class UrlStorage(DatabaseStorage):
                            count=count)
         for item in data:
             self.push(group, item.u_target, 4)
+        self.session.commit()
         return data
 
     def set(self, group, query, stat=1):
@@ -122,15 +121,15 @@ class UrlStorage(DatabaseStorage):
         if not self.session.query(self._mapper_cls).get(url):
             self.session.add(self._mapper_cls(
                 u_target=url, u_group=group, u_stat=stat or self.stat['wait']))
+            self.commit()
         elif self.check(stat):
             self.session.query(self._mapper_cls) \
                 .filter(self._mapper_cls.u_target == url).update({
                     'u_group': group,
                     'u_stat': stat
                 })
-        self.commit()
-
-
+  
+        
 class AccountStorage(DatabaseStorage):
 
     stat = {

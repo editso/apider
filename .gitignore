@@ -10,3 +10,5 @@ win
 build
 dist
 *.ini
+.cache
+test.py

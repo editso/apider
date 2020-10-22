@@ -130,11 +130,11 @@ class TcpServer(Server):
 
     @run_thread()
     def _handler_client(self, sock, addr, *args, **kwargs):
-        logging.info("Handler client: {}:{}".format(addr[0], addr[1]))
+        logger.info("Handler client: {}:{}".format(addr[0], addr[1]))
         self._handler(DefaultConnector(sock), **kwargs)
 
     def start(self):
-        logging.info("{}:{}".format(self.host, self.port))
+        logger.info("{}:{}".format(self.host, self.port))
         while True:
             sock = self._socket.accept()
             self._handler_client(*list(sock))

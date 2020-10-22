@@ -98,4 +98,3 @@ def get_localtime(mat='%Y-%m-%d/%H:%M:%S'):
 
 def md5_hex_digest(s: str, encode='utf8'):
     return hashlib.md5(s.encode(encode)).hexdigest()
-

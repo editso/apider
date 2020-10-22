@@ -1,4 +1,4 @@
-from os import read
+from scheduler.dynamic import load_module
 import account
 import argparse
 import scheduler
@@ -11,6 +11,7 @@ import selenium
 import sys
 import getpass
 import time
+import os
 
 from storage import HostStorage
 
@@ -41,93 +42,25 @@ __base_config__ = {
     }
 }
 
+__url_cache_name__ = 'linkedin_cache2'
 
-class AccountCache(account.AccountManager):
-    def __init__(self, group, engine):
-        self._cache = storage.AccountStorage(engine=engine)
-        self._group = group
+def get_elasticsearch():
+    es = __base_config__['es']
+    return {
+        'hosts': es['host'],
+        'ports': es['port'],
+        'scheme': es['scheme'],
+        'user': es['user'],
+        'password': es['password']
+    }
 
-    def get(self):
-        account = self._cache.get(self.group)
-        return {
-            'account': account.u_account,
-            'password': account.u_password
-        } if account else None
-
-    def invalid(self, account):
-        self._cache.push(self.group, account, stat=2)
-
-
-class UrlCache(spider.Cache):
-
-    def __init__(self, group, engine) -> None:
-        self._engine = engine
-        self._cahce = storage.UrlStorage(self._engine)
-        self._group = group
-
-    def push(self, value):
-        self._cahce.push(group=self._group, **value)
-
-    def pop(self):
-        data = self._cahce.get(self._group)
-        return data[0].u_target if data else None
-
-
-class LinkedinAdapter(spider.LinkedinAdapter):
-
-    def __init__(self, engine, *args, **kwargs):
-        self._account = AccountCache('linkedin', engine)
-        self._cache = UrlCache('linkedin', engine)
-        es = __base_config__['es']
-        self._storage = spider.ElasticStorage(
-            hosts=es['host'],
-            ports=es['port'],
-            scheme=es['scheme'],
-            user=es['user'],
-            password=es['password']
-        )
-
-    def get_account(self):
-        return self._account
-
-    def get_driver(self):
-        chrome_options = selenium.webdriver.ChromeOptions()
-        chrome_options.add_experimental_option('w3c', False)
-        return selenium.webdriver.Chrome(options=chrome_options)
-        # return selenium.webdriver.Remote(command_executor="http://172.16.2.129:4444/wd/hub",
-        #                                  options=chrome_options)
-
-    def get_cache(self):
-        return self._cache
-
-    def get_storage(self):
-        return self._storage
-
-
-class LinkedinService(scheduler.RemoteService):
-    def __init__(self):
-        self._engine = storage.make_mysql(**__base_config__['mysql'])
-        self._adapter = LinkedinAdapter(self._engine)
-
-    def crawl(self, url):
-        return ''
-        # with spider.Linkedin(url, self._adapter) as linked:
-        #     log = linked.start()
-        #     if log.code == 200:
-        #         self._adapter.get_cache().push({
-        #             'url': url,
-        #             'stat': 2
-        #         })
-        #     return scheduler.make_response(log.u_target, code=log.code)
-
-
-class DispatcherListener(scheduler.DispatchListener):
-
-    def error(self, request, *args, **kwargs):
-        print("error", request)
-
-    def success(self, res, request, **kwargs):
-        print(res)
+def load_config(config, ignore=True):
+    try:
+        with open(config, 'r', encoding='utf-8') as c:
+            __base_config__.update(json.loads(c.read()))
+    except Exception as e:
+        if not ignore:
+            raise e
 
 
 class ConnectAdapter(scheduler.ConnectorAdapter, scheduler.Verify):
@@ -172,86 +105,33 @@ class ConnectAdapter(scheduler.ConnectorAdapter, scheduler.Verify):
     def get(self):
         return self._queue.get()
 
-
-class InvokeListener(scheduler.RemoteInvokeListener):
-
-    def __init__(self, cache):
-        self._cache = cache
-
-    def on_start(self):
-        return super().on_start()
-
-    def on_stop(self):
-        return super().on_stop()
-
-    def on_invoke(self, request, connector):
-        return super().on_invoke(request, connector)
-
-    def on_invoke_finish(self, resp):
-        return super().on_invoke_finish(resp)
-
-    # def on_have(self, server):
-    #     self._cache.push(server.host, server.port, stat=1)
-
-    # def on_full(self, server):
-    #     self._cache.push(server.host, server.port, stat=2)
-
-
-class LinkedinTask(scheduler.Task):
-
-    def __init__(self, cache, *args, **kwargs):
-        self._cache = cache
-        self._url = None
-        self.count = 0
-
-    def retry(self, task: scheduler.Request):
-        url = task.kwargs.get('url')
-        logging.info('retry task: {}'.format(url))
-        self._cache.push({
-            'url': url
-        })
-
-    def has_task(self):
-        self._url = None
-        while True:
-            try:
-                self._url = self._cache.pop()
-                if self._url:
-                    break
-            except Exception as e:
-                logging.debug("get task error", exc_info=e)
-            time.sleep(5)
-        return self._url is not None
-
-    def next_task(self):
-        return scheduler.make_request(
-            cls_name=LinkedinService.__name__,
-            method_name=LinkedinService.crawl.__name__,
-            timeout=10 * 60,
-            url=self._url
-        )
-
-
-def load_config(config):
-    with open(config, 'r', encoding='utf-8') as c:
-        __base_config__.update(json.loads(c.read()))
-
+def set_work(args):
+    dir = args['work_dir']
+    if not dir:
+        return
+    os.chdir(dir)
 
 def run_scheduler(args):
-    load_config(args['config'])
+    set_work(args)
+    load_config(args['config'], ignore=False)
     mysql_engine = storage.make_mysql(**__base_config__['mysql'])
-    dispatcher = scheduler.remote_invoke_dispatcher(ConnectAdapter(
-        cache=storage.HostStorage(mysql_engine)
-    ))
-    dispatcher.add_listener(DispatcherListener())
     ts = scheduler.Scheduler()
-    ts.register(LinkedinTask(UrlCache('linkedin', mysql_engine)))
+    modelue = scheduler.load_module(args['module'])
+    modelue.__config__ = __base_config__
+    tasks = scheduler.new_all_instalce(modelue, (scheduler.Task, scheduler.ConnectorAdapter))
+    dispatcher = scheduler.remote_invoke_dispatcher(ConnectAdapter(cache=storage.HostStorage(mysql_engine)))
+    for o in tasks:
+        if isinstance(o, scheduler.Task):
+            ts.register(o)
+        if isinstance(o, scheduler.DispatchListener):
+            dispatcher.add_listener(o)
     ts.add_dispatcher(dispatcher)
     ts.dispatch()
 
 
 def run_server(args):
-    load_config(args['config'])
+    set_work(args)
+    load_config(args['config'], ignore=False)
     server = __base_config__['server']
     server.update(args)
     mysql_engine = storage.make_mysql(**__base_config__['mysql'])
@@ -260,10 +140,16 @@ def run_server(args):
         port=int(server['listen']),
         invoke_timeout=server['timeout'],
         max_connection=server['max_connection'])
-    server.add_listener(InvokeListener(
-        cache=storage.HostStorage(mysql_engine)
-    ))
-    server.add_service(LinkedinService)
+    module = scheduler.load_module(args['module'])
+    module.__config__ = __base_config__
+    services = scheduler.find_class(module, scheduler.RemoteService)
+    listeners = scheduler.new_all_instalce(module, scheduler.RemoteInvokeListener)
+    print(listeners)
+    for o in listeners:
+        print(o)
+        server.add_listener(o)
+    for service in services:
+        server.add_service(service)
     server.start()
 
 
@@ -276,18 +162,20 @@ def make_client(args):
 
 
 def run_url(args):
-    cache = UrlCache(args['group'], make_client(args))
-    cache.push({
-        'url': args['name']
-    })
+    load_config(args['config'])
+    cache = spider.ElasticCache(
+        __url_cache_name__, elastic=get_elasticsearch())
+    cache.push({'url': args['name']})
 
 
 def run_account(args):
-    cache = AccountCache(args['group'], make_client(args))
+    load_config(args['config'])
+    cache = spider.LinkedAccount(**get_elasticsearch())
     cache.add(args['account'], args['password'])
 
 
 def run_host(args):
+    load_config(args['config'])
     cache = HostStorage(make_client(args))
     cache.push(args['host'], args['port'])
 
@@ -303,6 +191,8 @@ def main():
     parent.add_argument('-D', '--deamon', default=False)
     parent.add_argument('-d', '--debug', default=False, type=bool)
     parent.add_argument('-c', '--config', required=True)
+    parent.add_argument('-w', '--work-dir')
+    parent.add_argument('-m', '--module',required=True, help='run module')
 
     parser.set_defaults(func=lambda a: parser.print_help())
     sub_parser = parser.add_subparsers()
@@ -328,11 +218,12 @@ def main():
     add_parent.add_argument('-P', '--client-port', default=3306)
     add_parent.add_argument('-D', '--database')
     add_parent.add_argument('-n', '--name', required=True)
+    add_parent.add_argument('-c', '--config')
 
     add_url = sub_parser.add_parser(
         'url', help='add url', parents=[add_parent])
     add_url.set_defaults(func=run_url)
-    add_url.add_argument('-g', '--group', required=True)
+    add_url.add_argument('-g', '--group')
 
     add_account = sub_parser.add_parser(
         'account', help='add account', parents=[add_parent])
@@ -346,7 +237,7 @@ def main():
     add_host.set_defaults(func=run_host)
 
     args = parser.parse_args()
-    if args.debug:
+    if 'debug' in args and args.debug:
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
@@ -357,7 +248,7 @@ def main():
     except Exception as e:
         print("ERROR:\n{}\n".format(e))
         parser.print_help()
-
+        
 
 if __name__ == "__main__":
     main()

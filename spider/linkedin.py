@@ -19,7 +19,7 @@ from account import AccountManager
 
 class LinkedAccount(AccountManager):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self,*args, **kwargs):
         super().__init__()
         self._index_name = "linkedin_account"
         self._storage: ElasticStorage = ElasticStorage(*args, **kwargs)
@@ -40,14 +40,16 @@ class LinkedAccount(AccountManager):
             self._storage.update(self._index_name, e_id=account, body=data)
 
     def _get_account(self):
-        return self._storage.term_query(
-            self._index_name, {"stat": True}, _source=True, size=1)
+        return self._storage.term_query(self._index_name, {"stat": True}, _source=True, size=1)
 
-    def get(self):
+    def get(self, count=5):
         data = None
         while not data or data['hits']['total']['value'] <= 0:
             time.sleep(2)
             data = self._get_account()
+            if count == 0:
+                return None
+            count -= 1
         return data['hits']['hits'][0]['_source']
 
     def invalid(self, account):
@@ -494,6 +496,9 @@ class Linkedin(Spider):
         driver = self.driver
         url = parse.urlparse(driver.current_url)
         account = self._adapter.get_account().get()
+        if not account:
+            logging.info("no linkedin account!")
+            return False
         if url.path == '/authwall':
             login = driver.find_element_by_xpath(
                 "/html/body/main/div/div/form[2]/section/p/a")
