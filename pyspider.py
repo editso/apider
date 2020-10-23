@@ -7,13 +7,13 @@ import json
 import multiprocessing
 import logging
 import storage
-import selenium
 import sys
 import getpass
 import time
 import os
-
 from storage import HostStorage
+import copy
+import sys
 
 
 __base_config__ = {
@@ -44,8 +44,11 @@ __base_config__ = {
 
 __url_cache_name__ = 'linkedin_cache2'
 
+
+__tmp_config_name__ = '.config.json'
+
 def get_elasticsearch():
-    es = __base_config__['es']
+    es = scheduler.__config__['es']
     return {
         'hosts': es['host'],
         'ports': es['port'],
@@ -54,6 +57,7 @@ def get_elasticsearch():
         'password': es['password']
     }
 
+
 def load_config(config, ignore=True):
     try:
         with open(config, 'r', encoding='utf-8') as c:
@@ -61,6 +65,13 @@ def load_config(config, ignore=True):
     except Exception as e:
         if not ignore:
             raise e
+    if sys.platform == 'win32':
+        try:
+            with open(__tmp_config_name__, 'w+', encoding='utf8') as f:
+                f.write(json.dumps(__base_config__, ensure_ascii=False))
+        except Exception as e:
+            pass
+    scheduler.__config__ = __base_config__
 
 
 class ConnectAdapter(scheduler.ConnectorAdapter, scheduler.Verify):
@@ -117,7 +128,6 @@ def run_scheduler(args):
     mysql_engine = storage.make_mysql(**__base_config__['mysql'])
     ts = scheduler.Scheduler()
     modelue = scheduler.load_module(args['module'])
-    modelue.__config__ = __base_config__
     tasks = scheduler.new_all_instalce(modelue, (scheduler.Task, scheduler.ConnectorAdapter))
     dispatcher = scheduler.remote_invoke_dispatcher(ConnectAdapter(cache=storage.HostStorage(mysql_engine)))
     for o in tasks:
@@ -132,21 +142,19 @@ def run_scheduler(args):
 def run_server(args):
     set_work(args)
     load_config(args['config'], ignore=False)
+    if __name__ != "__main__":
+        return
     server = __base_config__['server']
     server.update(args)
-    mysql_engine = storage.make_mysql(**__base_config__['mysql'])
     server = scheduler.RemoteInvokeServer(
         host=server['bind'],
         port=int(server['listen']),
         invoke_timeout=server['timeout'],
         max_connection=server['max_connection'])
     module = scheduler.load_module(args['module'])
-    module.__config__ = __base_config__
     services = scheduler.find_class(module, scheduler.RemoteService)
     listeners = scheduler.new_all_instalce(module, scheduler.RemoteInvokeListener)
-    print(listeners)
     for o in listeners:
-        print(o)
         server.add_listener(o)
     for service in services:
         server.add_service(service)
@@ -184,7 +192,7 @@ def run_show(args):
     print(json.dumps(__base_config__))
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(sys.argv[0].split('.')[0])
     parent = argparse.ArgumentParser(add_help=False)
 
@@ -248,7 +256,11 @@ def main():
     except Exception as e:
         print("ERROR:\n{}\n".format(e))
         parser.print_help()
-        
+
+
 
 if __name__ == "__main__":
-    main()
+    if sys.platform == 'win32':
+        load_config(__tmp_config_name__)
+    multiprocessing.freeze_support()
+    parse_args()

@@ -112,7 +112,6 @@ class TimerProcess(object):
         self._target = target
         self.args = args
         self.kwargs = kwargs
-        multiprocessing.freeze_support()
         self._proc = multiprocessing.Process(
             target=self._proxy_invoke, args=args, kwargs=kwargs)
         self._result = multiprocessing.Queue()
@@ -127,20 +126,17 @@ class TimerProcess(object):
 
     def start_wait_result(self):
         res = None
+        self._proc.start()
         try:
-            self._proc.start()
             res = self._result.get(timeout=self._interval)
             self._proc.join()
-            if isinstance(res, Exception):
-                raise ValueError
-            return res
-        except ValueError:
-            raise res
         except Exception:
             raise TimeoutError()
         finally:
-            if self._proc.is_alive():
-                self._proc.terminate()
+            self._proc.kill()
+        if isinstance(res, Exception):
+            raise res
+        return res
 
 
 class PipeProcess(object):

@@ -8,11 +8,11 @@ import logging
 import time
 from selenium import webdriver
 from selenium.webdriver.remote.remote_connection import LOGGER
-from  urllib3.connectionpool import log
+from urllib3.connectionpool import log
+from scheduler import __config__
 
 
 __url_cache_name__ = 'linkedin_cache2'
-__config__ = {}
 
 def get_elasticsearch():
     es = __config__['es']
@@ -84,7 +84,6 @@ class LinkedinAdapter(spider.LinkedinAdapter):
 
 class LinkedinService(scheduler.RemoteService):
     def __init__(self):
-        # self._engine = storage.make_mysql(**__base_config__['mysql'])
         self._adapter = LinkedinAdapter(get_elasticsearch())
 
     def crawl(self, url):
