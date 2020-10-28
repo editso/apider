@@ -1,5 +1,4 @@
 from scheduler.dynamic import load_module
-import account
 import argparse
 import scheduler
 import spider
@@ -9,10 +8,8 @@ import logging
 import storage
 import sys
 import getpass
-import time
 import os
 from storage import HostStorage
-import copy
 import sys
 
 
@@ -116,6 +113,7 @@ class ConnectAdapter(scheduler.ConnectorAdapter, scheduler.Verify):
     def get(self):
         return self._queue.get()
 
+
 def set_work(args):
     dir = args['work_dir']
     if not dir:
@@ -162,6 +160,7 @@ def run_server(args):
 
 
 def make_client(args):
+    
     return storage.make_mysql(input('Enter user: '),
                               getpass.getpass("Enter password: "),
                               args['database'] or input('Enter database: '),
@@ -179,13 +178,15 @@ def run_url(args):
 def run_account(args):
     load_config(args['config'])
     cache = spider.LinkedAccount(**get_elasticsearch())
-    cache.add(args['account'], args['password'])
+    cache.add(args['name'], args['password'], ignore_ivalid=True)
 
 
 def run_host(args):
     load_config(args['config'])
-    cache = HostStorage(make_client(args))
-    cache.push(args['host'], args['port'])
+    __base_config__.update(args)
+    mysql = storage.make_mysql(**__base_config__['mysql'] or make_client())
+    cache = HostStorage(mysql)
+    cache.push(args['name'], args['port'])
 
 
 def run_show(args):

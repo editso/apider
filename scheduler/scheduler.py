@@ -1,11 +1,10 @@
 from queue import Queue
 import time
 from .utils import check_type, run_process, run_thread, \
-    run_timer, make_timer_process, \
-    object_proxy, PipeProcess, md5_hex_digest
+   make_timer_process, md5_hex_digest
 import threading
 import logging
-from .net import connect, Connector, TcpServer, Verify
+from .net import Connector, TcpServer, Verify
 import multiprocessing
 import elasticsearch
 import socket
