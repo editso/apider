@@ -44,6 +44,7 @@ __url_cache_name__ = 'linkedin_cache2'
 
 __tmp_config_name__ = '.config.json'
 
+
 def get_elasticsearch():
     es = scheduler.__config__['es']
     return {
@@ -257,7 +258,6 @@ def parse_args():
     except Exception as e:
         print("ERROR:\n{}\n".format(e))
         parser.print_help()
-
 
 
 if __name__ == "__main__":
